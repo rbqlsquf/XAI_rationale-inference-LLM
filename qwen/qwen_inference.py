@@ -150,9 +150,7 @@ if __name__ == "__main__":
     # model_path = "microsoft/Phi-3.5-mini-instruct"
     tokenizer, model = create_model(model_path)
 
-    instruction = (
-        instruction
-    ) = """**Instruction**
+    instruction = """**Instruction**
 Read the provided **Related Document**, find the **Answer** to the given **Question**, and extract it from the **Related Document**. Additionally, extract the sentence numbers needed to infer the **answer** from the **related document** and write them in the **Supporting Sentences**.  The number of supporting Sentences is at least one. You must strictly follow the **Output format** and provide valid information for all items.
 
 **Output format**
