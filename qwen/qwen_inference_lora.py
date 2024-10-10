@@ -3,15 +3,18 @@ import torch
 from tqdm import tqdm
 import json
 from peft import PeftModel, PeftConfig
+from datasets import Dataset
 
 
 def create_model(base_model_path, lora_path):
-    tokenizer = AutoTokenizer.from_pretrained(lora_path)
+    tokenizer = AutoTokenizer.from_pretrained(base_model_path)
     base_model = AutoModelForCausalLM.from_pretrained(base_model_path, device_map="auto")
+    new_special_tokens = {"additional_special_tokens": ["<|mrc|>", "<|summary|>"]}
+    tokenizer.add_special_tokens(new_special_tokens)
     base_model.resize_token_embeddings(len(tokenizer))
-    peft_model = PeftModel.from_pretrained(base_model, lora_path)
+    base_model.config.use_cache = False
     tokenizer.padding_side = "left"
-    tokenizer.pad_token = tokenizer.eos_token
+    peft_model = PeftModel.from_pretrained(base_model, lora_path)
     return tokenizer, peft_model
 
 
@@ -22,12 +25,18 @@ class InferenceInput:
         self.answer = answer
 
 
-def create_example(all_data, tokenizer):
+def create_example(all_example, tokenizer):
     all_result = []
     data_id = 1
-    for data in tqdm(all_data):
-        all_result.append(InferenceInput(_id=data_id, input_text=data["text"], answer=data["label"]))
-        data_id += 1
+    for example in tqdm(all_example):
+        messages = [
+            {"role": "system", "content": "<|MRC|>True<|SUM|>False"},
+            {"role": "user", "content": f"{example['question']}\n{example['document']}"},
+        ]
+        result = {}
+        result["input"] = tokenizer.apply_chat_template(messages, tokenize=False)
+        result["output"] = example["output"]
+        all_result.append(InferenceInput(_id=example["_id"], input_text=result["input"], answer=result["output"]))
         if len(all_result) == 20:
             break
     return all_result
@@ -51,12 +60,8 @@ def generate_batch_answer(batches, tokenizer, model):
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
-                max_new_tokens=256,
-                do_sample=True,
-                temperature=0.6,
-                top_p=0.9,
+                max_new_tokens=512,
             )
-        # Decode the output tokens back to text
 
         decoded_outputs = [
             tokenizer.decode(output[len(inputs[i]) :], skip_special_tokens=True) for i, output in enumerate(outputs)
@@ -77,7 +82,10 @@ def write_result(output_path):
             result = {}
             result["_id"] = item._id
             result["input_text"] = item.input_text
-            result["generated_text"] = item.generated_text
+            if "assistant" in item.generated_text:
+                result["generated_text"] = item.generated_text.split("assistant")[1]
+            else:
+                result["generated_text"] = item.generated_text
             result["answer"] = item.answer
             result["generated_all_answer"] = item.generated_all_answer
             all_result.append(result)
@@ -88,11 +96,11 @@ def write_result(output_path):
 
 if __name__ == "__main__":
     base_model_path = "Qwen/Qwen2.5-3B-Instruct"
-    model_path = "lora_tuning"
+    model_path = "lora_tuning_re"
     tokenizer, model = create_model(base_model_path, model_path)
 
-    file_path = "data/test.json"
-    batch_size = 16
+    file_path = "data/hotpot_dev.json"
+    batch_size = 8
     print(batch_size)
 
     with open(file_path, "r", encoding="utf-8") as file:
@@ -105,5 +113,5 @@ if __name__ == "__main__":
 
     answer_batches = generate_batch_answer(batches, tokenizer, model)
     #### 답변작성
-    output_path = "qwen_answer_test.json"
+    output_path = "output/test_2.json"
     write_result(output_path)
