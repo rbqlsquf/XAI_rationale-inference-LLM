@@ -2,18 +2,20 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 from tqdm import tqdm
 import json
+from peft import PeftModel, PeftConfig
+from datasets import Dataset
 
 
-def create_model(model_path):
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        device_map="auto",
-        torch_dtype=torch.bfloat16,
-    )
+def create_model(base_model_path, lora_path):
+    tokenizer = AutoTokenizer.from_pretrained(base_model_path)
+    base_model = AutoModelForCausalLM.from_pretrained(base_model_path, device_map="auto")
+    new_special_tokens = {"additional_special_tokens": ["<|mrc|>", "<|summary|>"]}
+    tokenizer.add_special_tokens(new_special_tokens)
+    base_model.resize_token_embeddings(len(tokenizer))
+    base_model.config.use_cache = False
     tokenizer.padding_side = "left"
-    tokenizer.pad_token = tokenizer.eos_token
-    return tokenizer, model
+    peft_model = PeftModel.from_pretrained(base_model, lora_path)
+    return tokenizer, peft_model
 
 
 class InferenceInput:
@@ -23,69 +25,24 @@ class InferenceInput:
         self.answer = answer
 
 
-def create_example(all_data, instruction, tokenizer):
+def create_example(all_example, tokenizer):
     all_result = []
-    for data in tqdm(all_data):
-        data_id = data["_id"]
-        Question = data["question"]
-        answer = data["answer"]
-        context = data["context"]
-        supporting_facts = data["supporting_facts"]
-        concat_supporting_sent = ""
-        document_number_support_sent = ""
-        support_dic = {}
-        write_supporting_sent = ""
-        total_sentence_dic = {}
-        # 전체 sentence number 세기 위함
-        total_sentence_number = 1
-        document_sentence_number = 0
-        support_num = []
-        supporting_sentence = ""
-        document = ""
-        for sup_sent in supporting_facts:
-            title = sup_sent[0]  # supporting fact의 제목
-            set_num = sup_sent[1]
-            if title not in support_dic.keys():  # 문장번호
-                support_dic[title] = []
-            support_dic[title].append(set_num)
-
-        for index, j in enumerate(context):
-            title = j[0]
-            sentences = ""
-            if title in support_dic:
-                document_sentence_number = 0
-                for sent in j[1]:
-                    sentence = "[{}] {}".format(total_sentence_number, sent) + "\n"
-                    sentences = sentences + sentence
-                    if document_sentence_number in support_dic[title]:
-                        support_num.append(total_sentence_number)
-                        supporting_sentence = supporting_sentence + sentence
-                    document_sentence_number += 1
-                    total_sentence_number += 1
-
-            else:
-                for sent in j[1]:
-                    sentence = "[{}] {}".format(total_sentence_number, sent) + "\n"
-                    sentences = sentences + sentence
-                    total_sentence_number += 1
-
-            write_sent = "Document {} : {}".format(index + 1, title) + "\n" + "{}".format(sentences)
-            document = document + write_sent + "\n"
-
-        prompt = "**Question**\n{}\n\n**Related Document**\n{}\n\n**Output format**\n".format(Question, document)
-        response = "**Answer**: {}\n**Supporting Sentences**: {}".format(answer, supporting_sentence)
-
-        messages = [
-            {"role": "system", "content": instruction},
-            {"role": "user", "content": prompt},
-            # {"role": "assistant", "content": response},
-        ]
-
-        all_result.append(
-            InferenceInput(
-                _id=data_id, input_text=tokenizer.apply_chat_template(messages, tokenize=False), answer=response
-            )
-        )
+    for example in tqdm(all_example):
+        if example["question"] == "summary":
+            messages = [
+                {"role": "system", "content": "<|MRC|>True<|SUM|>True"},
+                {"role": "user", "content": f"{example['document']}"},
+            ]
+        else:  # MRC의 경우
+            # messages = [{"role": "system", "content": "<|MRC|>False<|SUM|>True"}, {"role": "user", "content": f"**Question:{example['question']}\n{example['document']}"}]
+            messages = [
+                {"role": "system", "content": "<|MRC|>True<|SUM|>False"},
+                {"role": "user", "content": f"{example['document']}"},
+            ]
+        result = {}
+        result["input"] = tokenizer.apply_chat_template(messages, tokenize=False)
+        result["output"] = example["output"]
+        all_result.append(InferenceInput(_id=example["_id"], input_text=result["input"], answer=result["output"]))
         if len(all_result) == 20:
             break
     return all_result
@@ -109,12 +66,8 @@ def generate_batch_answer(batches, tokenizer, model):
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
-                max_new_tokens=256,
-                do_sample=True,
-                temperature=0.6,
-                top_p=0.9,
+                max_new_tokens=512,
             )
-        # Decode the output tokens back to text
 
         decoded_outputs = [
             tokenizer.decode(output[len(inputs[i]) :], skip_special_tokens=True) for i, output in enumerate(outputs)
@@ -134,8 +87,11 @@ def write_result(output_path):
         for item in batch:
             result = {}
             result["_id"] = item._id
-            # result["input_text"] = item.input_text
-            result["generated_text"] = item.generated_text
+            result["input_text"] = item.input_text
+            if "assistant" in item.generated_text:
+                result["generated_text"] = item.generated_text.split("assistant\n")[1]
+            else:
+                result["generated_text"] = item.generated_text
             result["answer"] = item.answer
             result["generated_all_answer"] = item.generated_all_answer
             all_result.append(result)
@@ -145,31 +101,23 @@ def write_result(output_path):
 
 
 if __name__ == "__main__":
-    model_path = "Qwen/Qwen2.5-3B-Instruct"
-    # model_path = "microsoft/phi-2"
-    # model_path = "microsoft/Phi-3.5-mini-instruct"
-    tokenizer, model = create_model(model_path)
+    base_model_path = "Qwen/Qwen2.5-3B-Instruct"
+    model_path = "lora_tuning_1010"
+    tokenizer, model = create_model(base_model_path, model_path)
 
-    instruction = """**Instruction**
-Read the provided **Related Document**, find the **Answer** to the given **Question**, and extract it from the **Related Document**. Additionally, extract the sentence numbers needed to infer the **answer** from the **related document** and write them in the **Supporting Sentences**.  The number of supporting Sentences is at least one. You must strictly follow the **Output format** and provide valid information for all items.
-
-**Output format**
-**Answer**: 
-**Supporting Sentences**:
-"""
-    file_path = "data/filtered_dev_data.json"
+    file_path = "data/hotpot_dev.json"
     batch_size = 16
     print(batch_size)
 
     with open(file_path, "r", encoding="utf-8") as file:
         dev_data = json.load(file)
 
-    input_data = create_example(dev_data, instruction, tokenizer)
+    input_data = create_example(dev_data, tokenizer)
 
     # Create batches of input items
     batches = list(create_batches(input_data, batch_size))
 
     answer_batches = generate_batch_answer(batches, tokenizer, model)
     #### 답변작성
-    output_path = "qwen_asnwer.json"
+    output_path = "output/1010/hotpot_no_q_tf.json"
     write_result(output_path)

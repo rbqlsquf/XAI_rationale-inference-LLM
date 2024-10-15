@@ -27,12 +27,22 @@ class InferenceInput:
 
 def create_example(all_example, tokenizer):
     all_result = []
-    data_id = 1
+    task_instruction = "Only fill in the **Answer to the **Question based on the **Document if <|MRC|> is True. Do not fill in the **Answer if the Question is not provided or if <|MRC|> is False. Only fill in the **Summary with a summary of the **Document if <|SUM|> is True. Do not fill in the **Summary if <|SUM|> is False."
     for example in tqdm(all_example):
-        messages = [
-            {"role": "system", "content": "<|MRC|>True<|SUM|>False"},
-            {"role": "user", "content": f"{example['question']}\n{example['document']}"},
-        ]
+        if example["question"] == "summary":
+            messages = [
+                {"role": "system", "content": f"{task_instruction}\n<|MRC|>True<|SUM|>True"},
+                {"role": "user", "content": f"{example['document']}"},
+            ]
+        else:  # MRC의 경우
+            messages = [
+                {
+                    "role": "system",
+                    "content": f"<|MRC|>True<|SUM|>True",
+                },
+                {"role": "user", "content": f"**Question:{example['question']}\n{example['document']}"},
+            ]
+
         result = {}
         result["input"] = tokenizer.apply_chat_template(messages, tokenize=False)
         result["output"] = example["output"]
@@ -83,7 +93,7 @@ def write_result(output_path):
             result["_id"] = item._id
             result["input_text"] = item.input_text
             if "assistant" in item.generated_text:
-                result["generated_text"] = item.generated_text.split("assistant")[1]
+                result["generated_text"] = item.generated_text.split("assistant\n")[1]
             else:
                 result["generated_text"] = item.generated_text
             result["answer"] = item.answer
@@ -96,11 +106,11 @@ def write_result(output_path):
 
 if __name__ == "__main__":
     base_model_path = "Qwen/Qwen2.5-3B-Instruct"
-    model_path = "lora_tuning_re"
+    model_path = "model/1011/checkpoint-3000"
     tokenizer, model = create_model(base_model_path, model_path)
 
-    file_path = "data/hotpot_dev.json"
-    batch_size = 8
+    file_path = "data/1008data/hotpot_dev.json"
+    batch_size = 16
     print(batch_size)
 
     with open(file_path, "r", encoding="utf-8") as file:
@@ -113,5 +123,5 @@ if __name__ == "__main__":
 
     answer_batches = generate_batch_answer(batches, tokenizer, model)
     #### 답변작성
-    output_path = "output/test_2.json"
+    output_path = "result_1011/hotpot_tt_3000.json"
     write_result(output_path)

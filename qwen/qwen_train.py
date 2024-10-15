@@ -35,17 +35,69 @@ IGNORE_INDEX = -100
 def process_func(example, tokenizer):
     MAX_LENGTH = 2048
     input_ids, attention_mask, labels = [], [], []
-    if example["question"] != "summary":
-        instruction = tokenizer(
-            f"<|im_start|>system\n<|MRC|>True<|SUM|>False<|im_end|>\n<|im_start|>user\n{example['question']}\n{example['document']}<|im_end|>\n",
-            add_special_tokens=False,
-        )  # add_special_tokens 不在开头加 special_tokens
+    mrc_value = -1
+    sum_value = -1
+    if example["mrc_type"] == "T":
+        mrc_value = "True"
     else:
-        instruction = tokenizer(
-            f"<|im_start|>system\n<|MRC|>False<|SUM|>True<|im_end|>\n<|im_start|>user\n{example['document']}<|im_end|>\n",
-            add_special_tokens=False,
-        )  # add_special_tokens 不在开头加 special_tokens
-    response = tokenizer(f"<|im_start|>assistant\n{example['output']}<|im_end|>\n", add_special_tokens=False)
+        mrc_value = "False"
+    if example["sum_type"] == "T":
+        sum_value = "True"
+    else:
+        sum_value = "False"
+
+    example["document"] = example["document"].strip()
+    ##############다시
+    task_instruction = "Only fill in the **Answer to the **Question based on the **Document if <|MRC|> is True. Do not fill in the **Answer if the Question is not provided or if <|MRC|> is False. Only fill in the **Summary with a summary of the **Document if <|SUM|> is True. Do not fill in the **Summary if <|SUM|> is False."
+    if example["data_type"] == "answer":
+        if example["answer_type"] == "F":
+            if example["question"] == "no":  # 질문이 없는 경우
+                instruction = tokenizer(
+                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n{example['document']}<|im_end|>\n",
+                    add_special_tokens=False,
+                )
+            else:
+                instruction = tokenizer(
+                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n{example['document']}<|im_end|>\n",
+                    add_special_tokens=False,
+                )
+            response = tokenizer(
+                f"<|im_start|>assistant\n**Answer:\n**Summary:\n<|im_end|>\n", add_special_tokens=False
+            )
+        else:  # 답 해야하는 경우 질문은 무조건 있음
+            instruction = tokenizer(
+                f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n{example['document']}<|im_end|>\n",
+                add_special_tokens=False,
+            )
+            response = tokenizer(
+                f"<|im_start|>assistant\n**Answer:{example['output']}\n**Summary:\n<|im_end|>\n",
+                add_special_tokens=False,
+            )
+    elif example["data_type"] == "summary":
+        if example["answer_type"] == "F":  # 무응답의 경우 질문이 무조건 없음
+            instruction = tokenizer(
+                f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n{example['document']}<|im_end|>\n",
+                add_special_tokens=False,
+            )
+            response = tokenizer(
+                f"<|im_start|>assistant\n**Answer:\n**Summary:\n<|im_end|>\n", add_special_tokens=False
+            )
+        else:  # 답 해야하는 경우 질문 유무
+            if example["question"] == "summary":  # 질문이 없는 경우
+                instruction = tokenizer(
+                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n{example['document']}<|im_end|>\n",
+                    add_special_tokens=False,
+                )
+            else:
+                instruction = tokenizer(
+                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n{example['document']}<|im_end|>\n",
+                    add_special_tokens=False,
+                )
+            response = tokenizer(
+                f"<|im_start|>assistant\n**Answer:\n**Summary:{example['output']}\n<|im_end|>\n",
+                add_special_tokens=False,
+            )
+
     input_ids = instruction["input_ids"] + response["input_ids"]
     attention_mask = instruction["attention_mask"] + response["attention_mask"]
     labels = [IGNORE_INDEX] * len(instruction["input_ids"]) + response["input_ids"]
@@ -60,13 +112,13 @@ if __name__ == "__main__":
 
     model_path = "Qwen/Qwen2.5-3B-Instruct"
     tokenizer, model = create_model(model_path)
-    data_file = "data/train_data_1008.json"
+    data_file = "data/train_data_1011.json"
 
     dataset = Dataset.from_json(data_file)
 
     processed_dataset = dataset.map(lambda example: process_func(example, tokenizer))
 
-    new_model = "lora_tuning_re"
+    new_model = "qwen_lora_inst"
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     peft_config = LoraConfig(
         target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
@@ -82,9 +134,9 @@ if __name__ == "__main__":
     model.print_trainable_parameters()
     for name, param in model.named_parameters():
         print(f"Parameter: {name}, requires_grad: {param.requires_grad}")
-    wandb.init(project="qwen lora")
+    wandb.init(project="qwen llm lora")
     training_params = TrainingArguments(
-        output_dir="./1008",
+        output_dir="/hdd/rbqlsquf/qwen_lora_1015",
         num_train_epochs=1,
         per_device_train_batch_size=4,
         gradient_accumulation_steps=2,
