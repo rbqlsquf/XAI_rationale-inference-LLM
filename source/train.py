@@ -19,13 +19,13 @@ from modeling_qwen2_pn import Qwen2ForCausalLM
 
 
 def create_model(model_path):
-    tokenizer = Qwen2ForCausalLM.from_pretrained(model_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
     model = Qwen2ForCausalLM.from_pretrained(model_path, device_map="cuda")
     new_special_tokens = {"additional_special_tokens": ["<|mrc|>", "<|summary|>"]}
     tokenizer.add_special_tokens(new_special_tokens)
     model.resize_token_embeddings(len(tokenizer))
     model.enable_input_require_grads()
-    model.config.use_cache = False
+    model.config.use_cache = True
     tokenizer.padding_side = "left"
     return tokenizer, model
 
@@ -115,7 +115,7 @@ if __name__ == "__main__":
     tokenizer, model = create_model(model_path)
     data_file = "data/1010data/train_data_1011.json"
 
-    dataset = Dataset.from_json(data_file[:10])
+    dataset = Dataset.from_json(data_file)
 
     processed_dataset = dataset.map(lambda example: process_func(example, tokenizer))
 
