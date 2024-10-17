@@ -134,6 +134,8 @@ if __name__ == "__main__":
 
     model.print_trainable_parameters()
     for name, param in model.named_parameters():
+        if "test" in name:
+            param.requires_grad = True
         print(f"Parameter: {name}, requires_grad: {param.requires_grad}")
     wandb.init(project="qwen llm lora")
     wandb.run.name = "1016"

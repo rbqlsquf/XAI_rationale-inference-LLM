@@ -980,8 +980,6 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         self.model = Qwen2Model(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-        self.test = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
-
         self.post_init()
 
     def get_input_embeddings(self):
@@ -1072,27 +1070,15 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         hidden_states = outputs[0]
         ####input과 response를 기준으로 나누기
         # label에 대해서 값이 -100 아닌 거부터 시작 (response)
-        # 찾고자 하는 값 (예: 151644)
-        target_value = 151644
-        mask = torch.eq(input_ids, target_value)
+        input_position = torch.argmax((input_ids != tokenizer.pad_token_id).int(), dim=1)
+        response_positions = torch.argmax((labels != IGNORE_INDEX).int(), dim=1)
+        # 101번 더하기 => instruction 101
+        input_position = input_position + 101
         batch_size = input_ids.size(0)
-        max_positions = 3
-        positions = torch.zeros(batch_size, max_positions, dtype=torch.long)
         for i in range(batch_size):
-            pos = torch.nonzero(mask[i]).squeeze()
-            pos = pos[:max_positions] if pos.numel() > max_positions else pos
-            positions[i, : pos.numel()] = pos
-
-        # positions [batch, 3] -> 첫번째는 system, user, assistant
-
-        for i in range(batch_size):
-            if positions[i][2] == 0:  # inference
-                values = hidden_states[i][positions[i][1] :]
-            else:  # train
-                values = hidden_states[i][positions[i][1] : positions[i][2]]
-            average = self.test(values)
-            average = average.mean()
-            hidden_states[i] += average
+            values = hidden_states[i][:, input_position[i] : response_positions[i]]
+            average = values.float().mean().long()
+            hidden_states[i][:, response_positions[i] :] += average
 
         logits = self.lm_head(hidden_states)  # 토큰 중에 최대 값이 나오는 확률 찾기
         logits = logits.float()
