@@ -16,10 +16,6 @@ from modeling_qwen2_pn import Qwen2ForCausalLM
 
 
 class CustomTrainer(Trainer):
-    def __init__(self, *args, modify_input_fn=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.modify_input_fn = modify_input_fn  # 입력을 변경하는 함수
-
     def compute_loss(self, model, inputs, return_outputs=False):
         # input을 원하는 대로 수정
         model.model.evidence = None
@@ -125,7 +121,7 @@ if __name__ == "__main__":
 
     model_path = "Qwen/Qwen2.5-3B-Instruct"
     tokenizer, model = create_model(model_path)
-    data_file = "data/1010data/train_data_1011.json"
+    data_file = "data/train_data_1011.json"
 
     dataset = Dataset.from_json(data_file)
 
@@ -150,9 +146,9 @@ if __name__ == "__main__":
             param.requires_grad = True
         print(f"Parameter: {name}, requires_grad: {param.requires_grad}")
     wandb.init(project="qwen llm lora")
-    wandb.run.name = "1016"
+    wandb.run.name = "1017"
     training_params = TrainingArguments(
-        output_dir="1015",
+        output_dir="/hdd/rbqlsquf/qwen_lora_1017",
         num_train_epochs=1,
         per_device_train_batch_size=4,
         gradient_accumulation_steps=2,
