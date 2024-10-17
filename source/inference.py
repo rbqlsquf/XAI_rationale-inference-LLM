@@ -1,4 +1,4 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM, Qwen2ForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 import torch
 from tqdm import tqdm
@@ -6,21 +6,14 @@ import json
 from peft import PeftModel, PeftConfig
 from datasets import Dataset
 
-
-class CustomModelForCausalLM(AutoModelForCausalLM):
-    def generate(self, input_ids, max_length=512, pad_token_id=None, **kwargs):
-        mask = input_ids != pad_token_id
-        input_ids = input_ids[mask].view(input_ids.size(0), -1)
-        # 기본 generate 로직 호출
-        output = super().generate(input_ids, max_length=max_length, **kwargs)
-        return output
+from modeling_qwen2_pn import Qwen2ForCausalLM
 
 
 def create_model(base_model_path, lora_path):
     tokenizer = AutoTokenizer.from_pretrained(base_model_path)
 
-    # AutoModelForCausalLM -> CustomModelForCausalLM
-    base_model = CustomModelForCausalLM.from_pretrained(base_model_path, device_map="auto")
+    # AutoModelForCausalLM -> Qwen2ForCausalLM
+    base_model = Qwen2ForCausalLM.from_pretrained(base_model_path, device_map="auto")
     new_special_tokens = {"additional_special_tokens": ["<|mrc|>", "<|summary|>"]}
     tokenizer.add_special_tokens(new_special_tokens)
     base_model.resize_token_embeddings(len(tokenizer))
@@ -80,9 +73,10 @@ def generate_batch_answer(batches, tokenizer, model):
         ).to("cuda")
         model.to("cuda")
         with torch.no_grad():
+            model.model.evidence = None
             outputs = model.generate(
                 **inputs,
-                max_new_tokens=512,
+                max_new_tokens=10,
             )
 
         decoded_outputs = [
@@ -118,11 +112,11 @@ def write_result(output_path):
 
 if __name__ == "__main__":
     base_model_path = "Qwen/Qwen2.5-3B-Instruct"
-    model_path = "model/1015/checkpoint-1000"
+    model_path = "1015/checkpoint-1000"
     tokenizer, model = create_model(base_model_path, model_path)
 
     file_path = "data/1008data/hotpot_dev.json"
-    batch_size = 1
+    batch_size = 2
     print(batch_size)
 
     with open(file_path, "r", encoding="utf-8") as file:

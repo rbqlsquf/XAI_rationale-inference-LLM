@@ -981,7 +981,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.test = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
-
+        self.evidence = None
         self.post_init()
 
     def get_input_embeddings(self):
@@ -1063,6 +1063,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
             return_dict=return_dict,
             cache_position=cache_position,
         )
+
         IGNORE_INDEX = -100
         tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-3B-Instruct")
         new_special_tokens = {"additional_special_tokens": ["<|mrc|>", "<|summary|>"]}
@@ -1070,30 +1071,31 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         tokenizer.padding_side = "left"
 
         hidden_states = outputs[0]
-        ####input과 response를 기준으로 나누기
-        # label에 대해서 값이 -100 아닌 거부터 시작 (response)
-        # 찾고자 하는 값 (예: 151644)
-        target_value = 151644
-        mask = torch.eq(input_ids, target_value)
-        batch_size = input_ids.size(0)
-        max_positions = 3
-        positions = torch.zeros(batch_size, max_positions, dtype=torch.long)
-        for i in range(batch_size):
-            pos = torch.nonzero(mask[i]).squeeze()
-            pos = pos[:max_positions] if pos.numel() > max_positions else pos
-            positions[i, : pos.numel()] = pos
 
-        # positions [batch, 3] -> 첫번째는 system, user, assistant
+        if self.evidence is None:
+            evidence_vector = []
+            target_value = 151644
+            mask = torch.eq(input_ids, target_value)
+            batch_size = input_ids.size(0)
+            max_positions = 3
+            positions = torch.zeros(batch_size, max_positions, dtype=torch.long)
+            for i in range(batch_size):
+                pos = torch.nonzero(mask[i]).squeeze()
+                pos = pos[:max_positions] if pos.numel() > max_positions else pos
+                positions[i, : pos.numel()] = pos
 
-        for i in range(batch_size):
-            if positions[i][2] == 0:  # inference
-                values = hidden_states[i][positions[i][1] :]
-            else:  # train
-                values = hidden_states[i][positions[i][1] : positions[i][2]]
-            average = self.test(values)
-            average = average.mean()
-            hidden_states[i] += average
+            # positions [batch, 3] -> 첫번째는 system, user, assistant
 
+            for i in range(batch_size):
+                if positions[i][2] == 0:  # inference
+                    values = hidden_states[i][positions[i][1] :]
+                else:  # train
+                    values = hidden_states[i][positions[i][1] : positions[i][2]]
+                average = self.test(values)
+                average = torch.mean(average, dim=0, keepdim=True)
+                evidence_vector.append(average)
+            self.evidence = torch.stack(evidence_vector, 0)
+        hidden_states += self.evidence
         logits = self.lm_head(hidden_states)  # 토큰 중에 최대 값이 나오는 확률 찾기
         logits = logits.float()
         loss = None
@@ -1121,6 +1123,8 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
             attentions=outputs.attentions,
         )
 
+    from transformers.generation import utils
+
     # Copied from transformers.models.llama.modeling_llama.LlamaForCausalLM.prepare_inputs_for_generation
     def prepare_inputs_for_generation(
         self,
@@ -1133,6 +1137,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         use_cache=True,
         **kwargs,
     ):
+
         # If we have cache: let's slice `input_ids` through `cache_position`, to keep only the unprocessed tokens
         # Exception 1: when passing input_embeds, input_ids may be missing entries
         # Exception 2: some generation methods do special slicing of input_ids, so we don't need to do it here
@@ -1153,7 +1158,9 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         if inputs_embeds is not None and cache_position[0] == 0:
             model_inputs = {"inputs_embeds": inputs_embeds}
         else:
-            model_inputs = {"input_ids": input_ids.contiguous()}  # `contiguous()` needed for compilation use cases
+            model_inputs = {
+                "input_ids": input_ids.contiguous(),
+            }  # `contiguous()` needed for compilation use cases
 
         model_inputs.update(
             {

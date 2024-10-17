@@ -8,14 +8,26 @@ from transformers import (
     DataCollatorForSeq2Seq,
     TrainingArguments,
     Trainer,
-    GenerationConfig,
 )
 
 from peft import LoraConfig, get_peft_model
-from trl import SFTTrainer
-from torch.cuda.amp import autocast, GradScaler
 import wandb
 from modeling_qwen2_pn import Qwen2ForCausalLM
+
+
+class CustomTrainer(Trainer):
+    def __init__(self, *args, modify_input_fn=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.modify_input_fn = modify_input_fn  # 입력을 변경하는 함수
+
+    def compute_loss(self, model, inputs, return_outputs=False):
+        # input을 원하는 대로 수정
+        model.evidence = None
+        # 모델에 수정된 inputs 전달
+        outputs = model(**inputs)
+        loss = outputs.get("loss")
+
+        return (loss, outputs) if return_outputs else loss
 
 
 def create_model(model_path):
@@ -156,7 +168,7 @@ if __name__ == "__main__":
         push_to_hub=False,
         report_to="wandb",
     )
-    trainer = Trainer(
+    trainer = CustomTrainer(
         model=model,
         args=training_params,
         train_dataset=processed_dataset,
