@@ -25,7 +25,7 @@ def create_model(model_path):
     tokenizer.add_special_tokens(new_special_tokens)
     model.resize_token_embeddings(len(tokenizer))
     model.enable_input_require_grads()
-    model.config.use_cache = True
+    model.config.use_cache = False
     tokenizer.padding_side = "left"
     return tokenizer, model
 
@@ -136,6 +136,7 @@ if __name__ == "__main__":
     for name, param in model.named_parameters():
         print(f"Parameter: {name}, requires_grad: {param.requires_grad}")
     wandb.init(project="qwen llm lora")
+    wandb.run.name = "1016"
     training_params = TrainingArguments(
         output_dir="1015",
         num_train_epochs=1,

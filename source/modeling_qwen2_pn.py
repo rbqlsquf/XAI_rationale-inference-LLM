@@ -48,7 +48,7 @@ from transformers.utils import (
     replace_return_docstrings,
 )
 from transformers.models.qwen2.configuration_qwen2 import Qwen2Config
-
+from transformers import AutoTokenizer
 
 if is_flash_attn_2_available():
     from transformers.modeling_flash_attention_utils import _flash_attention_forward
@@ -1061,8 +1061,25 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
             return_dict=return_dict,
             cache_position=cache_position,
         )
+        IGNORE_INDEX = -100
+        tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-3B-Instruct")
+        new_special_tokens = {"additional_special_tokens": ["<|mrc|>", "<|summary|>"]}
+        tokenizer.add_special_tokens(new_special_tokens)
+        tokenizer.padding_side = "left"
 
         hidden_states = outputs[0]
+        ####input과 response를 기준으로 나누기
+        # label에 대해서 값이 -100 아닌 거부터 시작 (response)
+        input_position = torch.argmax((input_ids != tokenizer.pad_token_id).int(), dim=1)
+        response_positions = torch.argmax((labels != IGNORE_INDEX).int(), dim=1)
+        # 101번 더하기 => instruction 101
+        input_position = input_position + 101
+        batch_size = input_ids.size(0)
+        for i in range(batch_size):
+            values = hidden_states[i][:, input_position[i] : response_positions[i]]
+            average = values.float().mean().long()
+            hidden_states[i][:, response_positions[i] :] += average
+
         logits = self.lm_head(hidden_states)  # 토큰 중에 최대 값이 나오는 확률 찾기
         logits = logits.float()
         loss = None
