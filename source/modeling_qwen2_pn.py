@@ -1063,8 +1063,6 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
             return_dict=return_dict,
             cache_position=cache_position,
         )
-
-        IGNORE_INDEX = -100
         tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-3B-Instruct")
         new_special_tokens = {"additional_special_tokens": ["<|mrc|>", "<|summary|>"]}
         tokenizer.add_special_tokens(new_special_tokens)
@@ -1074,7 +1072,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
 
         if self.evidence is None:
             evidence_vector = []
-            target_value = 151644
+            target_value = tokenizer.encode("<|im_start|>")[0]
             mask = torch.eq(input_ids, target_value)
             batch_size = input_ids.size(0)
             max_positions = 3
@@ -1087,7 +1085,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
             # positions [batch, 3] -> 첫번째는 system, user, assistant
 
             for i in range(batch_size):
-                if positions[i][2] == 0:  # inference
+                if positions[i][2] == 0:  # first inference
                     values = hidden_states[i][positions[i][1] :]
                 else:  # train
                     values = hidden_states[i][positions[i][1] : positions[i][2]]
@@ -1095,7 +1093,8 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
                 average = torch.mean(average, dim=0, keepdim=True)
                 evidence_vector.append(average)
             self.evidence = torch.stack(evidence_vector, 0)
-        hidden_states += self.evidence
+        tmp_hidden_states = hidden_states + self.evidence
+        hidden_states = tmp_hidden_states
         logits = self.lm_head(hidden_states)  # 토큰 중에 최대 값이 나오는 확률 찾기
         logits = logits.float()
         loss = None

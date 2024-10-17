@@ -22,7 +22,7 @@ class CustomTrainer(Trainer):
 
     def compute_loss(self, model, inputs, return_outputs=False):
         # input을 원하는 대로 수정
-        model.evidence = None
+        model.model.evidence = None
         # 모델에 수정된 inputs 전달
         outputs = model(**inputs)
         loss = outputs.get("loss")
