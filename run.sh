@@ -1,0 +1,1 @@
+python /home/rbqlsquf2/workspace/source/inference_mean.py

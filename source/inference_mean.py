@@ -6,7 +6,8 @@ import json
 from peft import PeftModel, PeftConfig
 from datasets import Dataset
 
-from modeling_qwen2_pn import Qwen2ForCausalLM
+from modeling_qwen2_mean import Qwen2ForCausalLM
+import argparse
 
 
 def create_model(base_model_path, lora_path):
@@ -52,7 +53,7 @@ def create_example(all_example, tokenizer):
         result["input"] = tokenizer.apply_chat_template(messages, tokenize=False)
         result["output"] = example["output"]
         all_result.append(InferenceInput(_id=example["_id"], input_text=result["input"], answer=result["output"]))
-        if len(all_result) == 20:
+        if len(all_result) == 10:
             break
     return all_result
 
@@ -76,7 +77,7 @@ def generate_batch_answer(batches, tokenizer, model):
             model.model.evidence = None
             outputs = model.generate(
                 **inputs,
-                max_new_tokens=10,
+                max_new_tokens=512,
             )
 
         decoded_outputs = [
@@ -111,12 +112,16 @@ def write_result(output_path):
 
 
 if __name__ == "__main__":
+    # parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
+    # parser.add_argument("--model_path", type=str, required=True, help="모델 경로")
+    # args = parser.parse_args()
+
     base_model_path = "Qwen/Qwen2.5-3B-Instruct"
-    model_path = "1015/checkpoint-1000"
+    model_path = "model/origin/checkpoint-3000"
     tokenizer, model = create_model(base_model_path, model_path)
 
     file_path = "data/1008data/hotpot_dev.json"
-    batch_size = 2
+    batch_size = 16
     print(batch_size)
 
     with open(file_path, "r", encoding="utf-8") as file:
@@ -129,5 +134,5 @@ if __name__ == "__main__":
 
     answer_batches = generate_batch_answer(batches, tokenizer, model)
     #### 답변작성
-    output_path = "result_1015/hotpot_tf_1000.json"
+    output_path = "result/origin/hotpot_tf_3000.json"
     write_result(output_path)
