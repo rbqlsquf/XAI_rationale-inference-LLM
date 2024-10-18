@@ -55,19 +55,35 @@ def process_func(example, tokenizer):
     else:
         sum_value = "False"
 
-    example["document"] = example["document"].strip()
-    ##############다시
     task_instruction = "Only fill in the **Answer to the **Question based on the **Document if <|MRC|> is True. Do not fill in the **Answer if the Question is not provided or if <|MRC|> is False. Only fill in the **Summary with a summary of the **Document if <|SUM|> is True. Do not fill in the **Summary if <|SUM|> is False."
+    example["document"] = example["document"].strip()
+    # token 된 doc
+    token_doc = {"input_ids": [], "attention_mask": []}
+    # document 문장 index
+    document_index = []
+    doc_len = 0
+    for i, sent in enumerate(example["sent"]):
+        # 0번 문장은 instruction으로 지정할 계획
+        sent = sent.strip()
+        document_index.append(doc_len)
+        token_sent = tokenizer(sent, add_special_tokens=False)
+        doc_len += len(token_sent["input_ids"])
+        token_doc["input_ids"] += token_sent["input_ids"]
+        token_doc["attention_mask"] += token_sent["attention_mask"]
+    token_end = tokenizer("<|im_end|>\n", add_special_tokens=False)
+    token_doc["input_ids"] += token_end["input_ids"]
+    token_doc["attention_mask"] += token_end["attention_mask"]
+
     if example["data_type"] == "answer":
         if example["answer_type"] == "F":
             if example["question"] == "no":  # 질문이 없는 경우
                 instruction = tokenizer(
-                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n{example['document']}<|im_end|>\n",
+                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n",
                     add_special_tokens=False,
                 )
             else:
                 instruction = tokenizer(
-                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n{example['document']}<|im_end|>\n",
+                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question'].strip()}\n**Document:\n",
                     add_special_tokens=False,
                 )
             response = tokenizer(
@@ -75,17 +91,17 @@ def process_func(example, tokenizer):
             )
         else:  # 답 해야하는 경우 질문은 무조건 있음
             instruction = tokenizer(
-                f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n{example['document']}<|im_end|>\n",
+                f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question'].strip()}\n**Document:\n",
                 add_special_tokens=False,
             )
             response = tokenizer(
-                f"<|im_start|>assistant\n**Answer:{example['output']}\n**Summary:\n<|im_end|>\n",
+                f"<|im_start|>assistant\n**Answer:{example['output'].strip()}\n**Summary:\n<|im_end|>\n",
                 add_special_tokens=False,
             )
     elif example["data_type"] == "summary":
         if example["answer_type"] == "F":  # 무응답의 경우 질문이 무조건 없음
             instruction = tokenizer(
-                f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n{example['document']}<|im_end|>\n",
+                f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n",
                 add_special_tokens=False,
             )
             response = tokenizer(
@@ -94,34 +110,42 @@ def process_func(example, tokenizer):
         else:  # 답 해야하는 경우 질문 유무
             if example["question"] == "summary":  # 질문이 없는 경우
                 instruction = tokenizer(
-                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n{example['document']}<|im_end|>\n",
+                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n",
                     add_special_tokens=False,
                 )
             else:
                 instruction = tokenizer(
-                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n{example['document']}<|im_end|>\n",
+                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question'].strip()}\n**Document:\n",
                     add_special_tokens=False,
                 )
             response = tokenizer(
-                f"<|im_start|>assistant\n**Answer:\n**Summary:{example['output']}\n<|im_end|>\n",
+                f"<|im_start|>assistant\n**Answer:\n**Summary:{example['output'].strip()}\n<|im_end|>\n",
                 add_special_tokens=False,
             )
-
-    input_ids = instruction["input_ids"] + response["input_ids"]
-    attention_mask = instruction["attention_mask"] + response["attention_mask"]
-    labels = [IGNORE_INDEX] * len(instruction["input_ids"]) + response["input_ids"]
+    # instruction에 대한 문장 번호
+    sentence_position = [x + len(instruction["input_ids"]) for x in document_index]
+    # 맨 청므 친구 0
+    sentence_position.insert(0, 0)
+    input_ids = instruction["input_ids"] + token_doc["input_ids"] + response["input_ids"]
+    attention_mask = instruction["attention_mask"] + token_doc["attention_mask"] + response["attention_mask"]
+    labels = [IGNORE_INDEX] * len(instruction["input_ids"] + token_doc["input_ids"]) + response["input_ids"]
     if len(input_ids) > MAX_LENGTH:
         input_ids = input_ids[:MAX_LENGTH]
         attention_mask = attention_mask[:MAX_LENGTH]
         labels = labels[:MAX_LENGTH]
-    return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
+    return {
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
+        "labels": labels,
+        "sentence_position": sentence_position,
+    }
 
 
 if __name__ == "__main__":
 
     model_path = "Qwen/Qwen2.5-3B-Instruct"
     tokenizer, model = create_model(model_path)
-    data_file = "data/1008data/train_data_1011.json"
+    data_file = "data/1017data/train_sent.json"
 
     dataset = Dataset.from_json(data_file)
 
@@ -148,7 +172,7 @@ if __name__ == "__main__":
     wandb.init(project="qwen llm lora")
     wandb.run.name = "1017"
     training_params = TrainingArguments(
-        output_dir="qwen_lora_1017",
+        output_dir="/hdd/rbqlsquf/qwen_lora_1017",
         num_train_epochs=1,
         per_device_train_batch_size=4,
         gradient_accumulation_steps=2,
