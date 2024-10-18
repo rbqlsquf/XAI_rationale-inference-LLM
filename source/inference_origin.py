@@ -1,14 +1,19 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, Qwen2ForCausalLM
+
 import torch
 from tqdm import tqdm
 import json
 from peft import PeftModel, PeftConfig
 from datasets import Dataset
 
+import argparse
+
 
 def create_model(base_model_path, lora_path):
     tokenizer = AutoTokenizer.from_pretrained(base_model_path)
-    base_model = AutoModelForCausalLM.from_pretrained(base_model_path, device_map="auto")
+
+    # AutoModelForCausalLM -> Qwen2ForCausalLM
+    base_model = Qwen2ForCausalLM.from_pretrained(base_model_path, device_map="auto")
     new_special_tokens = {"additional_special_tokens": ["<|mrc|>", "<|summary|>"]}
     tokenizer.add_special_tokens(new_special_tokens)
     base_model.resize_token_embeddings(len(tokenizer))
@@ -32,22 +37,22 @@ def create_example(all_example, tokenizer):
         if example["question"] == "summary":
             messages = [
                 {"role": "system", "content": f"{task_instruction}\n<|MRC|>True<|SUM|>True"},
-                {"role": "user", "content": f"{example['document']}"},
+                {"role": "user", "content": f"**Document:\n{example['document']}"},
             ]
         else:  # MRC의 경우
             messages = [
                 {
                     "role": "system",
-                    "content": f"<|MRC|>True<|SUM|>True",
+                    "content": f"{task_instruction}\n<|MRC|>True<|SUM|>False",
                 },
-                {"role": "user", "content": f"**Question:{example['question']}\n{example['document']}"},
+                {"role": "user", "content": f"**Question:{example['question']}\n**Document:\n{example['document']}"},
             ]
 
         result = {}
         result["input"] = tokenizer.apply_chat_template(messages, tokenize=False)
         result["output"] = example["output"]
         all_result.append(InferenceInput(_id=example["_id"], input_text=result["input"], answer=result["output"]))
-        if len(all_result) == 20:
+        if len(all_result) == 100:
             break
     return all_result
 
@@ -68,6 +73,7 @@ def generate_batch_answer(batches, tokenizer, model):
         ).to("cuda")
         model.to("cuda")
         with torch.no_grad():
+            model.model.evidence = None
             outputs = model.generate(
                 **inputs,
                 max_new_tokens=512,
@@ -105,8 +111,18 @@ def write_result(output_path):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
+    parser.add_argument("--model_path", type=str, required=True, help="모델 경로")
+    parser.add_argument("--output_path", type=str, required=True, help="결과저장 경로")
+    args = parser.parse_args()
+    model_path = args.model_path
+    output_path = args.output_path
+
+    # model_path = "model/origin/checkpoint-1000"
+    # output_path = "origin/mean/hotpot_1000.json"
+
     base_model_path = "Qwen/Qwen2.5-3B-Instruct"
-    model_path = "model/origin/checkpoint-3000"
+
     tokenizer, model = create_model(base_model_path, model_path)
 
     file_path = "data/1008data/hotpot_dev.json"
@@ -123,5 +139,5 @@ if __name__ == "__main__":
 
     answer_batches = generate_batch_answer(batches, tokenizer, model)
     #### 답변작성
-    output_path = "result/orrigin/test_3000.json"
+
     write_result(output_path)

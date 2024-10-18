@@ -1,1 +1,2 @@
-python /home/rbqlsquf2/workspace/source/inference_mean.py
+python /home/rbqlsquf2/workspace/XAI_rationale-inference-LLM/source/inference_mean.py --model_path /home/rbqlsquf2/workspace/XAI_rationale-inference-LLM/model/mean/checkpoint-3000 --output_path /home/rbqlsquf2/workspace/XAI_rationale-inference-LLM/result/mean/hotpot_3000.json
+python /home/rbqlsquf2/workspace/XAI_rationale-inference-LLM/source/inference_origin.py --model_path /home/rbqlsquf2/workspace/XAI_rationale-inference-LLM/model/origin/checkpoint-3000 --output_path /home/rbqlsquf2/workspace/XAI_rationale-inference-LLM/result/origin/hotpot_3000.json
