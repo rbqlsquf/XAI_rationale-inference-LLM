@@ -52,8 +52,8 @@ def create_example(all_example, tokenizer):
         result["input"] = tokenizer.apply_chat_template(messages, tokenize=False)
         result["output"] = example["output"]
         all_result.append(InferenceInput(_id=example["_id"], input_text=result["input"], answer=result["output"]))
-        if len(all_result) == 100:
-            break
+        # if len(all_result) == 100:
+        #     break
     return all_result
 
 
