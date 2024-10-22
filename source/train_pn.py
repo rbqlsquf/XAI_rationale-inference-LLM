@@ -5,6 +5,7 @@ from datasets import Dataset
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
+    AutoConfig,
     DataCollatorForSeq2Seq,
     TrainingArguments,
     Trainer,
@@ -12,7 +13,7 @@ from transformers import (
 
 from peft import LoraConfig, get_peft_model
 import wandb
-from modeling_qwen2_pn import Qwen2ForCausalLM
+from modeling_qwen2_pn_2 import Qwen2ForCausalLM_pn
 
 
 class CustomDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
@@ -46,9 +47,9 @@ class CustomTrainer(Trainer):
         return (loss, outputs) if return_outputs else loss
 
 
-def create_model(model_path):
+def create_model(model_path, config):
     tokenizer = AutoTokenizer.from_pretrained(model_path)
-    model = Qwen2ForCausalLM.from_pretrained(model_path, device_map="cuda")
+    model = Qwen2ForCausalLM_pn.from_pretrained(model_path, config=config, device_map="cuda")
     new_special_tokens = {"additional_special_tokens": ["<|mrc|>", "<|summary|>"]}
     tokenizer.add_special_tokens(new_special_tokens)
     model.resize_token_embeddings(len(tokenizer))
@@ -167,7 +168,14 @@ def process_func(example, tokenizer):
 if __name__ == "__main__":
 
     model_path = "Qwen/Qwen2.5-3B-Instruct"
-    tokenizer, model = create_model(model_path)
+    config = AutoConfig.from_pretrained(model_path)
+    ##############################################################
+    #               model param 추가할 내용
+    ##############################################################
+    config.beam_size = 3
+    config.max_dec_len = 3
+
+    tokenizer, model = create_model(model_path, config)
     data_file = "data/1020data/train_data_1022.json"
 
     dataset = Dataset.from_json(data_file)
@@ -193,8 +201,14 @@ if __name__ == "__main__":
         if "test" in name:
             param.requires_grad = True
         print(f"Parameter: {name}, requires_grad: {param.requires_grad}")
+
+    ##############################################################
+    #               wanb
+    ##############################################################
     wandb.init(project="qwen llm lora")
     wandb.run.name = "1017"
+
+    ##############################################################
     training_params = TrainingArguments(
         output_dir="qwen_lora_2020",
         num_train_epochs=1,
