@@ -15,6 +15,23 @@ import wandb
 from modeling_qwen2_pn import Qwen2ForCausalLM
 
 
+class CustomDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
+    def __call__(self, features):
+        # 기존의 input_ids, attention_mask, labels 등의 처리는 부모 클래스에서 처리
+        batch = super().__call__(features)
+
+        # 예를 들어 sentence_masks 추가
+        sentence_masks = [f.get("sentence_masks", None) for f in features]
+
+        # sentence_masks가 None이 아닌 경우 패딩 처리
+        if sentence_masks[0] is not None:
+            max_length = max(len(mask) for mask in sentence_masks)
+            padded_sentence_masks = [[0] * (max_length - len(mask)) + mask for mask in sentence_masks]
+            batch["sent_masks"] = torch.tensor(padded_sentence_masks)
+
+        return batch
+
+
 class CustomTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False):
         # input을 원하는 대로 수정
@@ -60,17 +77,18 @@ def process_func(example, tokenizer):
     # token 된 doc
     token_doc = {"input_ids": [], "attention_mask": []}
     # document 문장 index
-    document_index = []
-    doc_len = 0
+    sentence_number = 0
+    sentence_position = []
     for i, sent in enumerate(example["sent"]):
         # 0번 문장은 instruction으로 지정할 계획
         sent = sent.strip()
-        document_index.append(doc_len)
-        token_sent = tokenizer(sent, add_special_tokens=False)
-        doc_len += len(token_sent["input_ids"])
+        token_sent = tokenizer(sent + " ", add_special_tokens=False)
+        sentence_number += 1  # 1부터 시작
+        sentence_position.extend([sentence_number] * len(token_sent["input_ids"]))
         token_doc["input_ids"] += token_sent["input_ids"]
         token_doc["attention_mask"] += token_sent["attention_mask"]
     token_end = tokenizer("<|im_end|>\n", add_special_tokens=False)
+    sentence_position.extend([sentence_number] * len(token_end))
     token_doc["input_ids"] += token_end["input_ids"]
     token_doc["attention_mask"] += token_end["attention_mask"]
 
@@ -123,13 +141,15 @@ def process_func(example, tokenizer):
                 add_special_tokens=False,
             )
     # instruction에 대한 문장 번호
-    sentence_position = [x + len(instruction["input_ids"]) for x in document_index]
-    # 맨 청므 친구 0
-    sentence_position.insert(0, 0)
+    sentence_position = [0] * len(instruction["input_ids"]) + sentence_position
+    sentence_position.extend([0] * len(response["input_ids"]))
     input_ids = instruction["input_ids"] + token_doc["input_ids"] + response["input_ids"]
     attention_mask = instruction["attention_mask"] + token_doc["attention_mask"] + response["attention_mask"]
     labels = [IGNORE_INDEX] * len(instruction["input_ids"] + token_doc["input_ids"]) + response["input_ids"]
+    assert len(input_ids) == len(sentence_position) == len(attention_mask) == len(labels)
+
     if len(input_ids) > MAX_LENGTH:
+        sentence_position = sentence_position[:MAX_LENGTH]
         input_ids = input_ids[:MAX_LENGTH]
         attention_mask = attention_mask[:MAX_LENGTH]
         labels = labels[:MAX_LENGTH]
@@ -137,7 +157,7 @@ def process_func(example, tokenizer):
         "input_ids": input_ids,
         "attention_mask": attention_mask,
         "labels": labels,
-        "sentence_position": sentence_position,
+        "sent_masks": sentence_position,
     }
 
 
@@ -145,10 +165,11 @@ if __name__ == "__main__":
 
     model_path = "Qwen/Qwen2.5-3B-Instruct"
     tokenizer, model = create_model(model_path)
-    data_file = "data/1017data/train_sent.json"
+    data_file = "data/1020data/train_data_1020.json"
 
     dataset = Dataset.from_json(data_file)
-
+    # 아래 코드는 일부만 가지고 오기 위함
+    dataset = dataset.select(range(100))
     processed_dataset = dataset.map(lambda example: process_func(example, tokenizer))
 
     new_model = "qwen_lora_inst"
@@ -172,9 +193,9 @@ if __name__ == "__main__":
     wandb.init(project="qwen llm lora")
     wandb.run.name = "1017"
     training_params = TrainingArguments(
-        output_dir="/hdd/rbqlsquf/qwen_lora_1017",
+        output_dir="qwen_lora_2020",
         num_train_epochs=1,
-        per_device_train_batch_size=4,
+        per_device_train_batch_size=4,  # 수정했음
         gradient_accumulation_steps=2,
         warmup_ratio=0.1,
         learning_rate=1e-4,
@@ -192,7 +213,7 @@ if __name__ == "__main__":
         model=model,
         args=training_params,
         train_dataset=processed_dataset,
-        data_collator=DataCollatorForSeq2Seq(tokenizer=tokenizer, padding=True),
+        data_collator=CustomDataCollatorForSeq2Seq(tokenizer=tokenizer, padding=True),
     )
     trainer.train()
     trainer.save_model(new_model)

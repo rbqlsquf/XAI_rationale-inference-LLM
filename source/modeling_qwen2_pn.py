@@ -26,7 +26,7 @@ import torch
 import torch.utils.checkpoint
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-
+from torch.nn import functional as F
 from transformers.activations import ACT2FN
 from transformers.cache_utils import Cache, DynamicCache, StaticCache
 from transformers.modeling_attn_mask_utils import (
@@ -972,6 +972,15 @@ class Qwen2Model(Qwen2PreTrainedModel):
         return causal_mask
 
 
+# class BeamSearchDecododer(nn.Module):
+#     def __init__(self):
+#         self.decoder = nn.GRU(
+#             input_size=config.hidden_size, hidden_size=config.hidden_size, batch_first=True, num_layers=1
+#         )
+
+#     def save(self):
+
+
 class Qwen2ForCausalLM(Qwen2PreTrainedModel):
     _tied_weights_keys = ["lm_head.weight"]
 
@@ -980,9 +989,15 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         self.model = Qwen2Model(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+
+        self.dropout = nn.Dropout(0.1)
+
         self.test = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
         self.evidence = None
         self.post_init()
+
+    # def _load_decoder(self):
+    #     self.decoder.load_state_dict(condig.decoder_path)
 
     def get_input_embeddings(self):
         return self.model.embed_tokens
@@ -1017,7 +1032,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        sentence_position: Optional[torch.Tensor] = None,
+        sent_masks: Optional[torch.Tensor] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         r"""
         Args:
@@ -1063,13 +1078,12 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             cache_position=cache_position,
-            sentence_position=sentence_position,
         )
         tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-3B-Instruct")
         new_special_tokens = {"additional_special_tokens": ["<|mrc|>", "<|summary|>"]}
         tokenizer.add_special_tokens(new_special_tokens)
         tokenizer.padding_side = "left"
-
+        # [batch, max_length, hidden]
         hidden_states = outputs[0]
 
         if self.evidence is None:
@@ -1085,12 +1099,27 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
                 positions[i, : pos.numel()] = pos
 
             # positions [batch, 3] -> 첫번째는 system, user, assistant
+            # 위에 내용에 대해서는 target_value 즉, assistant 시작하는 부분을 찾기 위한 함수였음
+            # [batch, max_sent, max_length]
+            sentence_masks = F.one_hot(sent_masks).transpose(1, 2).float()
+            div_term = torch.sum(sentence_masks, dim=-1, keepdim=True)
+            div_term = div_term.masked_fill(div_term == 0, 1e-10)
+            sent_attention_masks = (
+                div_term.masked_fill(div_term != 1e-10, 0).masked_fill(div_term == 1e-10, 1).squeeze(dim=2).bool()
+            )
+            sentence_representation = sentence_masks.bmm(hidden_states)
+            sentence_representation = sentence_representation / div_term
+            sentence_representation = self.dropout(sentence_representation)
+
+            sent_attention_masks = sent_attention_masks.float()
 
             for i in range(batch_size):
                 if positions[i][2] == 0:  # first inference
                     values = hidden_states[i][positions[i][1] :]
+                    decoder_inputs = hidden_states[:, -1, :].unsqueeze(dim=1)
                 else:  # train
                     values = hidden_states[i][positions[i][1] : positions[i][2]]
+                    decoder_inputs = hidden_states[:, positions[i][2], :].unsqueeze(dim=1)
                 average = self.test(values)
                 average = torch.mean(average, dim=0, keepdim=True)
                 evidence_vector.append(average)
@@ -1122,6 +1151,8 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
+            # evidence_sentence =
+            # evidence_logits =
         )
 
     from transformers.generation import utils
