@@ -1087,16 +1087,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         hidden_states = outputs[0]
 
         if self.evidence is None:
-            evidence_vector = []
-            target_value = tokenizer.encode("<|im_start|>")[0]
-            mask = torch.eq(input_ids, target_value)
             batch_size = input_ids.size(0)
-            max_positions = 3
-            positions = torch.zeros(batch_size, max_positions, dtype=torch.long)
-            for i in range(batch_size):
-                pos = torch.nonzero(mask[i]).squeeze()
-                pos = pos[:max_positions] if pos.numel() > max_positions else pos
-                positions[i, : pos.numel()] = pos
 
             # positions [batch, 3] -> 첫번째는 system, user, assistant
             # 위에 내용에 대해서는 target_value 즉, assistant 시작하는 부분을 찾기 위한 함수였음
@@ -1111,38 +1102,75 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
 
             # sentence_representation : [batch, max_sent, hidden]
             sentence_representation = self.dropout(sentence_representation)
-            #문장들이 없는 곳에 1을 넣는거임... 왜? 무시할 곳에 1을 넣음 -> 나중에 디코딩단계에서 확률을 낮춰주기 위함
+            # 문장들이 없는 곳에 1을 넣는거임... 왜? 무시할 곳에 1을 넣음 -> 나중에 디코딩단계에서 확률을 낮춰주기 위함
             sent_attention_masks = (
                 div_term.masked_fill(div_term != 1e-10, 0).masked_fill(div_term == 1e-10, 1).squeeze(dim=2).bool()
             )
-            
-            
-            # 무시해야할 부분을 1 필요한 부분을 0으로 만든 과정?
+
             sent_attention_masks = sent_attention_masks.float()
 
-            # 질문 부분 무시?
+            # 질문 부분을 무시하기 위함
             sent_attention_masks[:, 0] = 1
-            
-            mm = 1-sent_attention_masks
-            
+
+            # 신경써야할 부분 -> 문장들이 있는 경우(이 때 질문 instruction 부분 제외)
+            # mm : [batch, max_sent]
+            mm = 1 - sent_attention_masks
+
+            # 이제 진짜 필요없는 부분에 대해서 엄청 큰 음수값을 넣어줌
+            # sent_attention_masks : [batch, 1, max_sent]
+            sent_attention_masks = (
+                sent_attention_masks.masked_fill(sent_attention_masks == 1, -1e10)
+                .masked_fill(sent_attention_masks == 0, 0)
+                .unsqueeze(1)
+            )
             # 디코딩 시작
             last_hidden = None
+            # encoder_outputs: [batch, max_sent, hidde]
+            encoder_outputs = sentence_representation.unsqueeze(dim=1)
 
+            ################################################################################
+            # im_start 위치를 찾고 decoding 하는 단계
+            ################################################################################
+            evidence_vector = []
+            target_value = tokenizer.encode("<|im_start|>")[0]
+            mask = torch.eq(input_ids, target_value)
+            max_positions = 3
+            positions = torch.zeros(batch_size, max_positions, dtype=torch.long)
+            for i in range(batch_size):
+                pos = torch.nonzero(mask[i]).squeeze()
+                pos = pos[:max_positions] if pos.numel() > max_positions else pos
+                positions[i, : pos.numel()] = pos
+            position_length = positions[:2]
+
+            decoder_inputs = []
             for i in range(batch_size):
                 if positions[i][2] == 0:  # first inference
                     values = hidden_states[i][positions[i][1] :]
-                    decoder_inputs = hidden_states[:, -1, :].unsqueeze(dim=1)
+                    decoder_inputs.append(hidden_states[i][-1, :])
                 else:  # train
                     values = hidden_states[i][positions[i][1] : positions[i][2]]
-                    decoder_inputs = hidden_states[:, positions[i][2], :].unsqueeze(dim=1)
+
+                    # 전체 입력에서 마지막에 해당하는 벡터 값을 가지고 오기 위함...
+                    decoder_inputs.append(hidden_states[i][positions[i][2] - 1, :])
+
                 average = self.test(values)
                 average = torch.mean(average, dim=0, keepdim=True)
                 evidence_vector.append(average)
+            # decoder_inputs : [batch, hidden]
+            decoder_inputs = torch.stack(decoder_inputs, 0)
+            decoder_inputs = decoder_inputs.unsqueeze(dim=1)
+            #################################################
+            #               디코더 들어갈 위치                 #
+            #################################################
+
             self.evidence = torch.stack(evidence_vector, 0)
+
+        # element 합으로 수정
         tmp_hidden_states = hidden_states + self.evidence
         hidden_states = tmp_hidden_states
         logits = self.lm_head(hidden_states)  # 토큰 중에 최대 값이 나오는 확률 찾기
         logits = logits.float()
+
         loss = None
         if labels is not None:
             # Shift so that tokens < n predict n
