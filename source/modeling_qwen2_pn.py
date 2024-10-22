@@ -991,7 +991,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
         self.dropout = nn.Dropout(0.1)
-
+        self.max_sent = 60
         self.test = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
         self.evidence = None
         self.post_init()
@@ -1102,16 +1102,31 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
             # 위에 내용에 대해서는 target_value 즉, assistant 시작하는 부분을 찾기 위한 함수였음
             # [batch, max_sent, max_length]
             sentence_masks = F.one_hot(sent_masks).transpose(1, 2).float()
+            # div_term : [batch, max_sent, 1]
             div_term = torch.sum(sentence_masks, dim=-1, keepdim=True)
             div_term = div_term.masked_fill(div_term == 0, 1e-10)
+
+            sentence_representation = sentence_masks.bmm(hidden_states)
+            sentence_representation = sentence_representation / div_term
+
+            # sentence_representation : [batch, max_sent, hidden]
+            sentence_representation = self.dropout(sentence_representation)
+            #문장들이 없는 곳에 1을 넣는거임... 왜? 무시할 곳에 1을 넣음 -> 나중에 디코딩단계에서 확률을 낮춰주기 위함
             sent_attention_masks = (
                 div_term.masked_fill(div_term != 1e-10, 0).masked_fill(div_term == 1e-10, 1).squeeze(dim=2).bool()
             )
-            sentence_representation = sentence_masks.bmm(hidden_states)
-            sentence_representation = sentence_representation / div_term
-            sentence_representation = self.dropout(sentence_representation)
-
+            
+            
+            # 무시해야할 부분을 1 필요한 부분을 0으로 만든 과정?
             sent_attention_masks = sent_attention_masks.float()
+
+            # 질문 부분 무시?
+            sent_attention_masks[:, 0] = 1
+            
+            mm = 1-sent_attention_masks
+            
+            # 디코딩 시작
+            last_hidden = None
 
             for i in range(batch_size):
                 if positions[i][2] == 0:  # first inference

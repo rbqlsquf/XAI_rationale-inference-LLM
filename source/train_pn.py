@@ -17,11 +17,14 @@ from modeling_qwen2_pn import Qwen2ForCausalLM
 
 class CustomDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
     def __call__(self, features):
-        # 기존의 input_ids, attention_mask, labels 등의 처리는 부모 클래스에서 처리
-        batch = super().__call__(features)
+        # sentence_masks를 제외한 features 리스트 생성
+        features_without_masks = [{k: v for k, v in f.items() if k != "sent_masks"} for f in features]
+
+        # 부모 클래스에서 features_without_masks 처리
+        batch = super().__call__(features_without_masks)
 
         # 예를 들어 sentence_masks 추가
-        sentence_masks = [f.get("sentence_masks", None) for f in features]
+        sentence_masks = [f.get("sent_masks", None) for f in features]
 
         # sentence_masks가 None이 아닌 경우 패딩 처리
         if sentence_masks[0] is not None:
@@ -165,7 +168,7 @@ if __name__ == "__main__":
 
     model_path = "Qwen/Qwen2.5-3B-Instruct"
     tokenizer, model = create_model(model_path)
-    data_file = "data/1020data/train_data_1020.json"
+    data_file = "data/1020data/train_data_1022.json"
 
     dataset = Dataset.from_json(data_file)
     # 아래 코드는 일부만 가지고 오기 위함
