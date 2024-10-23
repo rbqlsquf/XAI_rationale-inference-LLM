@@ -43,7 +43,7 @@ def create_example(all_example, tokenizer):
             messages = [
                 {
                     "role": "system",
-                    "content": f"{task_instruction}\n<|MRC|>True<|SUM|>False",
+                    "content": f"{task_instruction}\n<|MRC|>True<|SUM|>True",
                 },
                 {"role": "user", "content": f"**Question:{example['question']}\n**Document:\n{example['document']}"},
             ]
@@ -119,7 +119,7 @@ if __name__ == "__main__":
     # output_path = args.output_path
 
     model_path = "model/hotpot_cnn/checkpoint-3000"
-    output_path = "result/hotpot_cnn/hotpot_3000.json"
+    output_path = "result/hotpot_cnn/hotpot_3000_tt.json"
 
     base_model_path = "Qwen/Qwen2.5-3B-Instruct"
 

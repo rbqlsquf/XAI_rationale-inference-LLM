@@ -25,7 +25,7 @@ from transformers import AutoTokenizer
 
 
 class BeamSearchAttentionDecoder(nn.Module):
-    def __init__(self, hidden_size, num_sent, topk=5):
+    def __init__(self, hidden_size, num_sent, topk=1):
         super(BeamSearchAttentionDecoder, self).__init__()
         self.hidden_size = hidden_size
         self.num_sent = num_sent
@@ -81,97 +81,34 @@ class BeamSearchAttentionDecoder(nn.Module):
         # result : [batch, 1, hidden]
         result = self.dense3(hidden_states)  # context와 output을 concat한 값
 
-        # attn_alignment 는 문장들의 확률 값
-        evidence_sentences = torch.argmax(attn_alignment, dim=-1)
+        #################################################################
+        #                일단 Greedy 하게 진행
+        #################################################################
 
-        # 이미 뽑은 친구들 attention_mask로 확률 낮춰줌
-        attention_mask[indexes, 0, evidence_sentences] = -1e10
-
-        ##############################################################
-        # beam search 부분임 수정해야함 아래는
-        ##############################################################
-        tmp_result = []
-        tmp_hidden = []
-        tmp_attention_mask = []
-        tmp_attn_outputs = []
-
-        flag = False
-
-        # tmp_attn_alignment = torch.zero ####~~!!! 여기서 부터 질문, attb_alignment는 지금 attention 2에 대해서 진행을 해야하나? 그냥 batch 단위로 하면 되는 거 아닌가?
         top_n_logit_indices = attn_alignment.topk(k=self.topk, dim=-1, sorted=True)
+        # scores : [batch, 1(topk)] , sentences : [batch, 1]
         scores = top_n_logit_indices.values.squeeze(1)
         sentences = top_n_logit_indices.indices.squeeze(1)
-        #
+
         # sentences = torch.argmax(attn_alignment, -1)
         # scores = attn_alignment[:, :, torch.argmax(attn_alignment)]
-        if evidence_scores is not None:
-            evidence_scores_sum = evidence_scores.unsqueeze(1).repeat(1, self.topk)
-            log_scores = -torch.log(scores) + evidence_scores_sum
-            l = log_scores.view(-1, self.topk * self.topk).tolist()
-            index_and_scores = [sorted(enumerate(e), key=lambda x: x[1], reverse=False) for e in l]
-            nodes = {}
-
-            tmp_evidence_scores = []
-            refine_evidence_sentences = []
-            refine_attention_scores = []
-            evidence_sentences = []
-            for batch_id, index_and_score in enumerate(index_and_scores):
-                tmp_evidence_scores.append([])
-                refine_attention_scores.append([])
-                evidence_sentences.append([])
-                tmp_result.append([])
-                tmp_hidden.append([])
-                tmp_attention_mask.append([])
-                tmp_attn_outputs.append([])
-                for sample_id, sorted_node in enumerate(index_and_score[: self.topk]):
-                    s, r = int(sorted_node[0] / self.topk), sorted_node[0] % self.topk
-                    s = s + batch_id * self.topk
-                    tmp_evidence_scores[-1].append(log_scores[s][r])
-                    tmp_result[-1].append(result[s])
-                    tmp_hidden[-1].append(hidden[0, s])
-                    refine_evidence_sentences.append(evidence_sentence_index[s] + [sentences[s][r].item()])
-                    refine_attention_scores[-1].append(
-                        torch.cat([attention_scores[:, s, :, :], attn_outputs[s, :, :].unsqueeze(0)], 0)
-                    )
-                    evidence_sentences[-1].append(sentences[s][r])
-                    tmp_attention_mask[-1].append(attention_mask[s])
-                    tmp_attn_outputs[-1].append(attn_outputs[s])
-
-                tmp_evidence_scores[-1] = torch.stack(tmp_evidence_scores[-1])
-                refine_attention_scores[-1] = torch.stack(refine_attention_scores[-1])
-                tmp_result[-1] = torch.stack(tmp_result[-1])
-                tmp_hidden[-1] = torch.stack(tmp_hidden[-1])
-                evidence_sentences[-1] = torch.stack(evidence_sentences[-1])
-                tmp_attention_mask[-1] = torch.stack(tmp_attention_mask[-1])
-                tmp_attn_outputs[-1] = torch.stack(tmp_attn_outputs[-1])
-
-            evidence_scores = torch.stack(tmp_evidence_scores).view(
-                -1,
-            )
-            attention_scores = (
-                torch.stack(refine_attention_scores, 0).view(batch_size, -1, 1, self.num_sent).transpose(0, 1)
-            )
-            result = torch.stack(tmp_result, 0).view(-1, 1, self.hidden_size)
-            hidden = torch.stack(tmp_hidden, 0).view(-1, self.hidden_size).unsqueeze(0)
-            evidence_sentence_index = refine_evidence_sentences
-            evidence_sentences = torch.stack(evidence_sentences, 0).view(
-                -1,
-            )
-            attention_mask = torch.stack(tmp_attention_mask, 0).view(-1, 1, self.num_sent)
-            attn_outputs = torch.stack(tmp_attn_outputs, 0).view(-1, 1, self.num_sent)
-
-        else:
-            flag = True
-            evidence_scores = -torch.log(scores[0 :: self.topk].reshape(-1))
-            evidence_sentences = sentences[0 :: self.topk].reshape(-1)  # 고친거 맞을까?
+        # evidence_scores : [batch,topk]
+        evidence_scores = -torch.log(scores)
+        # evidence_sentences : [batch,topk]
+        # 문장들 중 그래도 제일 앞에 있는 걸 가지고 옴 이걸 근거 문장으로 취급 [batch, 1]
+        evidence_sentences = sentences[:, 0]
         # if is_training:
         attention_mask[indexes, 0, evidence_sentences] = -1e10
 
-        if flag:
-            evidence_sentence_index = []
-            for item in evidence_sentences:
-                evidence_sentence_index.append([item.item()])
-            attention_scores = attn_outputs.unsqueeze(0)
+        if evidence_sentence_index is not None:
+            refine_evidence_sentences = []
+            for i, item in enumerate(evidence_sentences):
+                refine_evidence_sentences.append(evidence_sentence_index[s] + [sentences[s][r].item()])
+
+        evidence_sentence_index = []
+        for item in evidence_sentences:
+            evidence_sentence_index.append([item.item()])
+        attention_scores = attn_outputs
         # decoder_inputs, last_hidden, evidence_sentences, attention_scores, sent_attention_masks, evidence_scores,
         # evidence_scores : path 별 누적 점수 (beam search에서 상위 N개 뽑을때 사용)
         # attention_scores : 각 decoding step 별 문장 추출 logits
@@ -278,7 +215,6 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             ################################################################################
             # im_start 위치를 찾고 decoding 하는 단계
             ################################################################################
-            evidence_vector = []
             target_value = tokenizer.encode("<|im_start|>")[0]
             mask = torch.eq(input_ids, target_value)
             max_positions = 3
@@ -299,24 +235,21 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
                     # 전체 입력에서 마지막에 해당하는 벡터 값을 가지고 오기 위함...
                     decoder_inputs.append(hidden_states[i][positions[i][2] - 1, :])
 
-                average = self.test(values)
-                average = torch.mean(average, dim=0, keepdim=True)
-                evidence_vector.append(average)
             # decoder_inputs : [batch, hidden]
             decoder_inputs = torch.stack(decoder_inputs, 0)
             decoder_inputs = decoder_inputs.unsqueeze(dim=1)
 
-            attention_scores = []
             evidence_scores = None
             evidence_sentences = []
+            attention_scores = []
             #################################################
-            #               디코더 들어갈 위치                 #
+            #               디코더 들어갈 위치                #
             #################################################
             for evidence_step in range(self.max_dec_len):  # max_dec_len : 근거 문장 수
                 (
                     decoder_inputs,
                     last_hidden,
-                    evidence_sentences,
+                    evidence_sentence,
                     attention_scores,
                     sent_attention_masks,
                     evidence_scores,
@@ -329,9 +262,16 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
                     evidence_scores,
                     evidence_sentences,
                 )
+                evidence_sentences.append(evidence_sentence)
+                attention_scores.append(attention_scores)
 
-            self.evidence = torch.stack(evidence_vector, 0)
+            evidence_vector = decoder_inputs
+            self.evidence = evidence_vector
+            evidence_sentences = torch.tensor(evidence_sentences, dtype=torch.long).cuda()
 
+        ##############################################################################
+        #                   evidence_vector 만들었음                                  #
+        ##############################################################################
         # element 합으로 수정
         tmp_hidden_states = hidden_states + self.evidence
         hidden_states = tmp_hidden_states

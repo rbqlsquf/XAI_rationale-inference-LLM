@@ -13,7 +13,7 @@ from transformers import (
 
 from peft import LoraConfig, get_peft_model
 import wandb
-from source.modeling_qwen2_pn import Qwen2ForCausalLM_pn
+from modeling_qwen2_pn import Qwen2ForCausalLM_pn
 
 
 class CustomDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
