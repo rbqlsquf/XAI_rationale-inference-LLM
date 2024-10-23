@@ -56,6 +56,7 @@ class BeamSearchAttentionDecoder(nn.Module):
         """
         # decoder_input : [batch, hidden] # 주의!! 실제 batch보다 topk배 많음
         batch_size = decoder_inputs.size(0)
+        max_sent = encoder_outputs.size(1)
         indexes = [e for e in range(batch_size)]
         key_encoder_outputs = self.dense1(encoder_outputs)
         value_encoder_outputs = self.dense2(encoder_outputs)
@@ -84,6 +85,10 @@ class BeamSearchAttentionDecoder(nn.Module):
         #################################################################
         #                일단 Greedy 하게 진행
         #################################################################
+        tmp_result = []
+        tmp_hidden = []
+        tmp_attention_mask = []
+        tmp_attn_outputs = []
 
         top_n_logit_indices = attn_alignment.topk(k=self.topk, dim=-1, sorted=True)
         # scores : [batch*topk, 1(topk)] , sentences : [batch*topk, 1]
@@ -98,21 +103,64 @@ class BeamSearchAttentionDecoder(nn.Module):
             ####################################################################
             #                  evidence_scores_sum을 계산함 문장들의 log 확률 더함
             ####################################################################
-            # evidence_scores_sum : [batch, topk] -> [batch , topk * topk]
-            evidence_scores_sum = evidence_scores.repeat(1, self.topk)
-            # log_scores : [batch, topk*topk]
-            log_scores = -torch.log(scores.repeat(1, self.topk)) + evidence_scores_sum
-            l = log_scores.tolist()
+            # evidence_scores_sum : [batch*topk] -> [batch *topk , topk]
+            evidence_scores_sum = evidence_scores.unsqueeze(1).repeat(1, self.topk)
+            # log_scores : [batch*topk, topk]
+            log_scores = -torch.log(scores) + evidence_scores_sum
+            l = log_scores.view(-1, self.topk * self.topk).tolist()
             index_and_scores = [sorted(enumerate(e), key=lambda x: x[1], reverse=False) for e in l]
 
+            tmp_evidence_scores = []
             refine_evidence_sentences = []
-            for batch_id, item in enumerate(evidence_sentences):
-                # 더 추가적으로 적어줘야하니까
-                refine_evidence_sentences.append(evidence_sentence_index[batch_id] + [item.item()])
+            refine_attention_scores = []
+            evidence_sentences = []
+            for batch_id, index_and_score in enumerate(index_and_scores):
+                tmp_evidence_scores.append([])
+                refine_attention_scores.append([])
+                evidence_sentences.append([])
+                tmp_result.append([])
+                tmp_hidden.append([])
+                tmp_attention_mask.append([])
+                tmp_attn_outputs.append([])
+                for sample_id, sorted_node in enumerate(index_and_score[: self.topk]):
+                    s, r = int(sorted_node[0] / self.topk), sorted_node[0] % self.topk
+                    s = s + batch_id * self.topk
+                    tmp_evidence_scores[-1].append(log_scores[s][r])
+                    tmp_result[-1].append(result[s])
+                    tmp_hidden[-1].append(hidden[0, s])
+                    refine_evidence_sentences.append(evidence_sentence_index[s] + [sentences[s][r].item()])
+                    refine_attention_scores[-1].append(
+                        torch.cat([attention_scores[:, s, :, :], attn_outputs[s, :, :].unsqueeze(0)], 0)
+                    )
+                    evidence_sentences[-1].append(sentences[s][r])
+                    tmp_attention_mask[-1].append(attention_mask[s])
+                    tmp_attn_outputs[-1].append(attn_outputs[s])
+
+                tmp_evidence_scores[-1] = torch.stack(tmp_evidence_scores[-1])
+                refine_attention_scores[-1] = torch.stack(refine_attention_scores[-1])
+                tmp_result[-1] = torch.stack(tmp_result[-1])
+                tmp_hidden[-1] = torch.stack(tmp_hidden[-1])
+                evidence_sentences[-1] = torch.stack(evidence_sentences[-1])
+                tmp_attention_mask[-1] = torch.stack(tmp_attention_mask[-1])
+                tmp_attn_outputs[-1] = torch.stack(tmp_attn_outputs[-1])
+
+            evidence_scores = torch.stack(tmp_evidence_scores).view(
+                -1,
+            )
+            attention_scores = (
+                torch.stack(refine_attention_scores, 0).view(batch_size, -1, 1, max_sent).transpose(0, 1)
+            )
+            result = torch.stack(tmp_result, 0).view(-1, 1, self.hidden_size)
+            hidden = torch.stack(tmp_hidden, 0).view(-1, self.hidden_size).unsqueeze(0)
             evidence_sentence_index = refine_evidence_sentences
+            evidence_sentences = torch.stack(evidence_sentences, 0).view(
+                -1,
+            )
+            attention_mask = torch.stack(tmp_attention_mask, 0).view(batch_size, 1, -1)
+            attn_outputs = torch.stack(tmp_attn_outputs, 0).view(batch_size, 1, -1)
 
         else:
-            evidence_scores = -torch.log(scores)[: batch_size // self.topk]
+            evidence_scores = -torch.log(scores)[: batch_size // self.topk].reshape(-1)
             evidence_sentences = sentences[: batch_size // self.topk].reshape(-1)
             evidence_sentence_index = []
 
@@ -120,8 +168,8 @@ class BeamSearchAttentionDecoder(nn.Module):
             for item in evidence_sentences:
                 evidence_sentence_index.append([item.item()])
 
-            # attention_scores : [batch*topk, 1, max_sent]
-            attention_scores = attn_outputs
+            # attention_scores : [batch*topk, 1, max_sent] -> [1, batch*topk, 1, max_sent]
+            attention_scores = attn_outputs.unsqueeze(0)
 
         # 근거 문장의 확률 낮춤
         attention_mask[indexes, 0, evidence_sentences] = -1e10
@@ -147,6 +195,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         self.beam_size = config.beam_size
         self.gru = BeamSearchAttentionDecoder(config.hidden_size, self.max_sent, self.beam_size)
         self.max_dec_len = config.max_dec_len
+        self.hidden_size = config.hidden_size
 
     def forward(
         self,
@@ -195,7 +244,9 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             # positions [batch, 3] -> 첫번째는 system, user, assistant
             # 위에 내용에 대해서는 target_value 즉, assistant 시작하는 부분을 찾기 위한 함수였음
             # [batch, max_sent, max_length]
+
             sentence_masks = F.one_hot(sent_masks).transpose(1, 2).float()
+            max_sent = sentence_masks.size(1)
             # div_term : [batch, max_sent, 1]
             div_term = torch.sum(sentence_masks, dim=-1, keepdim=True)
             div_term = div_term.masked_fill(div_term == 0, 1e-10)
@@ -262,9 +313,9 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             #           입력을 topk 만큼 복제
             #################################################
             # [batch, 1, hidden] -> [batch *topk, 1, hidden] -> 묶음으로 repeat됨
-            decoder_inputs = decoder_inputs.repeat(self.beam_size, 1, 1)
-            encoder_outputs = encoder_outputs.repeat(self.beam_size, 1, 1)
-            sent_attention_masks = sent_attention_masks.repeat(self.beam_size, 1, 1)
+            decoder_inputs = decoder_inputs.repeat(1, self.beam_size, 1).view(-1, 1, self.hidden_size)
+            encoder_outputs = encoder_outputs.repeat(1, self.beam_size, 1, 1).view(-1, max_sent, self.hidden_size)
+            sent_attention_masks = sent_attention_masks.repeat(1, self.beam_size, 1).view(-1, 1, max_sent)
 
             evidence_scores = None
             evidence_sentences = []
@@ -290,9 +341,10 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
                     evidence_sentences,
                 )
 
-            evidence_vector = decoder_inputs
-            self.evidence = evidence_vector
-            evidence_sentences = torch.tensor(evidence_sentences, dtype=torch.long).cuda()
+        evidence_vector = decoder_inputs.view(-1, self.beam_size, self.hidden_size)
+        evidence_sentences = torch.tensor(evidence_sentences, dtype=torch.long).cuda()
+        self.evidence = evidence_vector
+        evidence = evidence_sentences
 
         ##############################################################################
         #                   evidence_vector 만들었음                                  #
@@ -302,6 +354,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         hidden_states = tmp_hidden_states
         logits = self.lm_head(hidden_states)  # 토큰 중에 최대 값이 나오는 확률 찾기
         logits = logits.float()
+        # 위 logits가 정답임
 
         loss = None
         if labels is not None:
