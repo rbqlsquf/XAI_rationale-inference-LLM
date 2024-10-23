@@ -172,8 +172,8 @@ if __name__ == "__main__":
     ##############################################################
     #               model param 추가할 내용
     ##############################################################
-    config.beam_size = 3
-    config.max_dec_len = 3
+    config.beam_size = 5
+    config.max_dec_len = 2
 
     tokenizer, model = create_model(model_path, config)
     data_file = "data/1020data/train_data_1022.json"
