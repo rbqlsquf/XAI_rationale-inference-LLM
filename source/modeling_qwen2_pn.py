@@ -47,7 +47,6 @@ class BeamSearchAttentionDecoder(nn.Module):
         attention_mask,
         evidence_scores=None,
         evidence_sentence_index=None,
-        is_training=True,
     ):
         """
         :param last_hidden: (1, batch, hidden)
@@ -55,6 +54,7 @@ class BeamSearchAttentionDecoder(nn.Module):
         :param encoder_outputs: (batch, seq_len, hidden)
         :return:
         """
+        # decoder_input : [batch, hidden]
         batch_size = decoder_inputs.size(0)
         indexes = [e for e in range(batch_size)]
         key_encoder_outputs = self.dense1(encoder_outputs)
@@ -80,6 +80,16 @@ class BeamSearchAttentionDecoder(nn.Module):
         hidden_states = torch.cat([context, output], -1)
         # result : [batch, 1, hidden]
         result = self.dense3(hidden_states)  # context와 output을 concat한 값
+
+        # attn_alignment 는 문장들의 확률 값
+        evidence_sentences = torch.argmax(attn_alignment, dim=-1)
+
+        # 이미 뽑은 친구들 attention_mask로 확률 낮춰줌
+        attention_mask[indexes, 0, evidence_sentences] = -1e10
+
+        ##############################################################
+        # beam search 부분임 수정해야함 아래는
+        ##############################################################
         tmp_result = []
         tmp_hidden = []
         tmp_attention_mask = []
@@ -162,6 +172,9 @@ class BeamSearchAttentionDecoder(nn.Module):
             for item in evidence_sentences:
                 evidence_sentence_index.append([item.item()])
             attention_scores = attn_outputs.unsqueeze(0)
+        # decoder_inputs, last_hidden, evidence_sentences, attention_scores, sent_attention_masks, evidence_scores,
+        # evidence_scores : path 별 누적 점수 (beam search에서 상위 N개 뽑을때 사용)
+        # attention_scores : 각 decoding step 별 문장 추출 logits
 
         return result, hidden, evidence_sentence_index, attention_scores, attention_mask, evidence_scores
 

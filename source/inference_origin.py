@@ -52,8 +52,8 @@ def create_example(all_example, tokenizer):
         result["input"] = tokenizer.apply_chat_template(messages, tokenize=False)
         result["output"] = example["output"]
         all_result.append(InferenceInput(_id=example["_id"], input_text=result["input"], answer=result["output"]))
-        # if len(all_result) == 100:
-        #     break
+        if len(all_result) == 100:
+            break
     return all_result
 
 
@@ -111,15 +111,15 @@ def write_result(output_path):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
-    parser.add_argument("--model_path", type=str, required=True, help="모델 경로")
-    parser.add_argument("--output_path", type=str, required=True, help="결과저장 경로")
-    args = parser.parse_args()
-    model_path = args.model_path
-    output_path = args.output_path
+    # parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
+    # parser.add_argument("--model_path", type=str, required=True, help="모델 경로")
+    # parser.add_argument("--output_path", type=str, required=True, help="결과저장 경로")
+    # args = parser.parse_args()
+    # model_path = args.model_path
+    # output_path = args.output_path
 
-    # model_path = "model/origin/checkpoint-1000"
-    # output_path = "origin/mean/hotpot_1000.json"
+    model_path = "model/hotpot_cnn/checkpoint-3000"
+    output_path = "result/hotpot_cnn/hotpot_3000.json"
 
     base_model_path = "Qwen/Qwen2.5-3B-Instruct"
 
