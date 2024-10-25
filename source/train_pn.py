@@ -16,6 +16,7 @@ import wandb
 from modeling_qwen2_pn import Qwen2ForCausalLM_pn
 from nltk.translate.bleu_score import sentence_bleu
 from torch.nn import functional as F
+import argparse
 
 
 class CustomDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
@@ -377,23 +378,39 @@ def process_func(example, tokenizer):
 
 if __name__ == "__main__":
 
-    model_path = "Qwen/Qwen2.5-3B-Instruct"
-    config = AutoConfig.from_pretrained(model_path)
     ##############################################################
     #               model param 추가할 내용
     ##############################################################
-    config.beam_size = 3
-    config.max_dec_len = 5
+    parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
+    parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
+    parser.add_argument("--data_file", type=str, default="data/1020data/train_data_1022.json")
+    parser.add_argument("--beam_size", type=int, default=1)
+    parser.add_argument("--max_dec_len", type=int, default=3)
+    parser.add_argument("--new_model", type=str, default="new_model")
+    parser.add_argument("--wandb_project", type=str, default="llm pointer network")
+    parser.add_argument("--wandb_run_name", type=str, default="1025")
+    parser.add_argument("--output_dir", type=str, default="/hdd/rbqlsquf/qwen_lora_1025")
+    parser.add_argument("--num_train_epochs", type=int, default=1)
+    parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
+    args = parser.parse_args()
+
+    #########################################################
+    #           변수들 선언
+    #########################################################
+    model_path = args.model_path
+
+    config = AutoConfig.from_pretrained(model_path)
+    config.beam_size = args.beam_size
+    config.max_dec_len = args.max_dec_len
 
     tokenizer, model = create_model(model_path, config)
-    data_file = "data/1020data/train_data_1022.json"
-
+    data_file = args.data_file
+    print("학습 데이터 : ", data_file)
     dataset = Dataset.from_json(data_file)
-    # 아래 코드는 일부만 가지고 오기 위함
-    dataset = dataset.select(range(100))
     processed_dataset = dataset.map(lambda example: process_func(example, tokenizer))
 
-    new_model = "qwen_lora_inst"
+    new_model = args.new_model
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     peft_config = LoraConfig(
         target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
@@ -408,26 +425,23 @@ if __name__ == "__main__":
 
     model.print_trainable_parameters()
     for name, param in model.named_parameters():
-        if "test" in name:
-            param.requires_grad = True
         print(f"Parameter: {name}, requires_grad: {param.requires_grad}")
 
     ##############################################################
     #               wanb
     ##############################################################
-    wandb.init(project="qwen llm lora")
-    wandb.run.name = "1017"
+    wandb.init(project=args.wandb_project)
+    wandb.run.name = args.wandb_run_name
 
     ##############################################################
     training_params = TrainingArguments(
-        output_dir="qwen_lora_2020",
-        num_train_epochs=1,
-        per_device_train_batch_size=2,  # 수정했음
-        gradient_accumulation_steps=1,
+        output_dir=args.output_dir,
+        num_train_epochs=args.num_train_epochs,
+        per_device_train_batch_size=args.batch_size,  # 수정했음
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
         warmup_ratio=0.1,
         learning_rate=1e-4,
         logging_steps=10,
-        run_name="qwen lora",
         lr_scheduler_type="cosine",
         gradient_checkpointing=True,
         save_steps=1000,
