@@ -12,7 +12,7 @@ from transformers import (
 
 from peft import LoraConfig, get_peft_model
 import wandb
-from modeling_qwen2_pn import Qwen2ForCausalLM
+from modeling_qwen2_mean import Qwen2ForCausalLM
 
 
 class CustomTrainer(Trainer):

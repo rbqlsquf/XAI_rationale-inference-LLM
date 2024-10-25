@@ -14,6 +14,8 @@ from transformers import (
 from peft import LoraConfig, get_peft_model
 import wandb
 from modeling_qwen2_pn import Qwen2ForCausalLM_pn
+from nltk.translate.bleu_score import sentence_bleu
+from torch.nn import functional as F
 
 
 class CustomDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
@@ -121,18 +123,85 @@ class CustomTrainer(Trainer):
         #########################################
         return predicted_answer, evidence_predicted_answer
 
-    def compute_evidence_f1_score(self, predicted_answer, evidence_predicted_answer, inputs):
+    def compute_evidence_f1_score(self, predicted_answer, evidence_predicted_answer, inputs, r_batch_size):
         # [path, batch]
-        f1_list = [1e-3 for _ in range(config.beam_size)]
-        g_f1_list = [1e-3 for _ in range(config.beam_size)]
-
+        f1_list = [[1e-3 for _ in range(r_batch_size)] for _ in range(config.beam_size)]
+        g_f1_list = [[1e-3 for _ in range(r_batch_size)] for _ in range(config.beam_size)]
         filtered_labels = [labels[labels != -100].tolist() for labels in inputs["labels"]]
         gold_list = tokenizer.batch_decode(filtered_labels, skip_special_tokens=True)
         for path in range(config.beam_size):
             predicted = predicted_answer[path]
             e_predicted = evidence_predicted_answer[path]
+            # batch 단위로 나옴
+            for batch_id, (pred_, e_pred_) in enumerate(zip(predicted, e_predicted)):
+                e_pred = e_pred_.replace("assistant\n**Answer:", "").replace("\n**Summary:", "").split(" ")
+                pred = pred_.replace("assistant\n**Answer:", "").replace("\n**Summary:", "").split(" ")
+                gold = gold_list[batch_id].replace("assistant\n**Answer:", "").replace("\n**Summary:", "").split()
+                f1 = sentence_bleu([pred], e_pred, weights=(1.0, 0, 0, 0))
+                g_f1 = sentence_bleu([gold], e_pred, weights=(1.0, 0, 0, 0))
+                f1_list[path][batch_id] += f1
+                g_f1_list[path][batch_id] += g_f1
+        f1_list = torch.tensor(f1_list, dtype=torch.float).cuda()
+        g_f1_list = torch.tensor(g_f1_list, dtype=torch.float).cuda()
 
-        return 0
+        # 가장 성능이 높은 Path 선정
+        ll = f1_list + g_f1_list
+        best_path = torch.argmax(ll, 0)
+        return best_path, f1_list, g_f1_list
+
+    def compute_evidence_loss(
+        self, r_batch_size, best_path, f1_list, g_f1_list, sampled_evidence_scores, sampled_evidence_sentence
+    ):
+        s_sampled_evidence_sentence = torch.zeros(
+            [config.beam_size, r_batch_size, config.max_dec_len, sampled_evidence_scores.size(-1)],
+            dtype=torch.long,
+        ).cuda()
+        g_sampled_evidence_sentence = torch.zeros(
+            [config.beam_size, r_batch_size, config.max_dec_len, sampled_evidence_scores.size(-1)],
+            dtype=torch.long,
+        ).cuda()
+
+        for idx in range(config.beam_size):
+
+            sampled_sampled_evidence_sentence = F.one_hot(
+                sampled_evidence_sentence[idx, :], num_classes=sampled_evidence_scores.size(-1)
+            ).unsqueeze(0)
+            negative_sampled_evidence_sentence = torch.sum(sampled_sampled_evidence_sentence, 1, keepdim=True)
+            f1 = f1_list[idx]
+            g_f1 = g_f1_list[idx]
+
+            # Evidence Vector based Answer <=> Evidence Sentence based Answer
+            #                  Gold Answer <=> Evidence Sentence based Answer
+
+            # 점수가 낮은 경우 추론된 Evidence Sentence를 제외한 모든 문장의 확률을 높이도록
+            if f1.item() < 0.5:
+                s_sampled_evidence_sentence[idx, :, :] = mask - negative_sampled_evidence_sentence
+                f1_list[idx] = 1 - f1
+            # 점수가 높을 경우 추론된 Evidence Sentence 확률을 높이도록
+            else:
+                s_sampled_evidence_sentence[idx, :, :] = sampled_sampled_evidence_sentence
+            if g_f1.item() < 0.5:
+                g_sampled_evidence_sentence[idx, :, :] = mask - negative_sampled_evidence_sentence
+                g_f1_list[idx] = 1 - g_f1
+            else:
+                g_sampled_evidence_sentence[idx, :, :] = sampled_sampled_evidence_sentence
+
+        e_div = torch.sum(s_sampled_evidence_sentence, -1)
+        g_div = torch.sum(g_sampled_evidence_sentence, -1)
+
+        evidence_nll = -F.log_softmax(sampled_evidence_scores, -1)
+        g_evidence_nll = -F.log_softmax(sampled_evidence_scores, -1)
+
+        evidence_nll = evidence_nll * s_sampled_evidence_sentence
+        g_evidence_nll = g_evidence_nll * g_sampled_evidence_sentence
+
+        evidence_nll = torch.mean(torch.sum(evidence_nll, -1) / e_div, -1)
+        evidence_nll = evidence_nll * f1_list
+
+        g_evidence_nll = torch.mean(torch.sum(g_evidence_nll, -1) / g_div, -1)
+        g_evidence_nll = g_evidence_nll * g_f1_list
+
+        return evidence_nll, g_evidence_nll
 
     def compute_loss(self, model, inputs, return_outputs=False):
         # input을 원하는 대로 수정
@@ -156,9 +225,21 @@ class CustomTrainer(Trainer):
             model, inputs, r_batch_size, loss, sampled_evidence_scores, mask, path_logits, sampled_evidence_sentence
         )
 
-        best_path = self.compute_evidence_f1_score(predicted_answer, evidence_predicted_answer, inputs)
+        best_path, f1_list, g_f1_list = self.compute_evidence_f1_score(
+            predicted_answer, evidence_predicted_answer, inputs, r_batch_size
+        )
 
-        return (loss, outputs) if return_outputs else loss
+        evidence_nll, g_evidence_nll = self.compute_evidence_loss(
+            r_batch_size, best_path, f1_list, g_f1_list, sampled_evidence_scores, sampled_evidence_sentence
+        )
+        if torch.mean(evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000:
+            loss = loss + 0.1 * evidence_nll
+        if torch.mean(g_evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000:
+            loss = loss + 0.1 * g_evidence_nll
+        if torch.mean(loss).item() > 0 and torch.mean(loss).item() < 1000:
+            loss[best_path].backward()
+
+        return (loss[best_path], outputs) if return_outputs else loss[best_path]
 
 
 def create_model(model_path, config):
