@@ -24,9 +24,7 @@ class CustomDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
         # 부모 클래스에서 features_without_masks 처리
         batch = super().__call__(features_without_masks)
 
-        # 예를 들어 sentence_masks 추가
         sentence_masks = [f.get("sent_masks", None) for f in features]
-
         # sentence_masks가 None이 아닌 경우 패딩 처리
         if sentence_masks[0] is not None:
             max_length = max(len(mask) for mask in sentence_masks)
@@ -37,12 +35,106 @@ class CustomDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
 
 
 class CustomTrainer(Trainer):
+    def generate_sentences(
+        self, model, inputs, r_batch_size, loss, sampled_evidence_scores, mask, logits, sampled_evidence_sentence
+    ):
+        # [batch, beam_size, max_dec, -1]
+        predicted_answer = []
+        for path in range(config.beam_size):
+            logit = torch.argmax(logits[path], dim=-1)
+
+            decoded_outputs = [
+                tokenizer.decode(output[inputs["labels"][i] != -100], skip_special_tokens=True)
+                for i, output in enumerate(logit)
+            ]
+            predicted_answer.append(decoded_outputs)
+            #####################################################
+            #           근거 문장 생성
+            #####################################################
+            evidence_path = (
+                sampled_evidence_sentence.view(r_batch_size, -1, config.max_dec_len).transpose(0, 1)[path].tolist()
+            )
+
+            sample_inputs = []
+            for k in range(r_batch_size):
+                # 첫 번째 1의 인덱스 찾기
+
+                #############################################################
+                #                   sentence_group에 대한 내용
+                #############################################################
+                sentence_groups = {}
+                for idx, sentence_num in enumerate(inputs["sent_masks"][k]):
+                    if str(sentence_num) not in sentence_groups:
+                        sentence_groups[str(sentence_num)] = []
+                    sentence_groups[str(sentence_num)].append(idx)
+
+                first_one_index = (inputs["sent_masks"][k] == 1).nonzero(as_tuple=True)[0][0].item()
+                tmp_sentence_mask = [0] * len(inputs["sent_masks"][k][:first_one_index])
+                see_tokens = list(range(0, len(inputs["sent_masks"][k][:first_one_index])))
+                for j in range(config.max_dec_len):
+                    see_tokens.extend(
+                        (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
+                    )
+
+                    tmp_sentence_mask = tmp_sentence_mask + [j + 1] * len(
+                        (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
+                    )
+                sentences = inputs["input_ids"][k][see_tokens]
+                tmp_input_ids = sentences.tolist()
+                tmp_input_ids = tmp_input_ids + [tokenizer.eos_token_id] + tokenizer.encode("\n")
+                tmp_sentence_mask.extend([0] * 2)
+                tokens = tokenizer.decode(tmp_input_ids)
+                tmp_attention_mask = torch.ones(len(tmp_input_ids), dtype=torch.long)
+
+                assert len(tmp_input_ids) == len(tmp_attention_mask) == len(tmp_sentence_mask)
+                # 데이터 추가하는 방법
+                sample_input = {
+                    "input_ids": tmp_input_ids,
+                    "attention_mask": tmp_attention_mask.squeeze(dim=0).tolist(),
+                    "sent_masks": tmp_sentence_mask,
+                }
+                sample_inputs.append(sample_input)
+            ###############################################
+            input_ids = [f.get("input_ids", None) for f in sample_inputs]
+            attention_mask = [f.get("attention_mask", None) for f in sample_inputs]
+            sentence_masks = [f.get("sent_masks", None) for f in sample_inputs]
+            max_length = max(len(mask) for mask in input_ids)
+            batch = {}
+            padded_input_ids = [[tokenizer.pad_token_id] * (max_length - len(mask)) + mask for mask in input_ids]
+            batch["input_ids"] = torch.tensor(padded_input_ids).cuda()
+            padded_attention_mask = [[0] * (max_length - len(mask)) + mask for mask in attention_mask]
+            batch["attention_mask"] = torch.tensor(padded_attention_mask).cuda()
+            padded_sentence_masks = [[0] * (max_length - len(mask)) + mask for mask in sentence_masks]
+            batch["sent_masks"] = torch.tensor(padded_sentence_masks).cuda()
+            ####################################################################
+
+            e_label_logits, e_sampled_evidence_sentence = model(
+                input_ids=batch["input_ids"], attention_mask=batch["attention_mask"], sent_masks=batch["sent_masks"]
+            )
+
+        return predicted_answer
+
     def compute_loss(self, model, inputs, return_outputs=False):
         # input을 원하는 대로 수정
         model.model.evidence = None
         # 모델에 수정된 inputs 전달
         outputs = model(**inputs)
-        loss = outputs.get("loss")
+        loss = outputs.get("loss")  # path, batch , 1742(max_sent)
+        sampled_evidence_scores = outputs.get("attention_scores")  # batch*path, 2, max_sent??
+        mask = outputs.get("mask")  # batch, dec_len, max_sent
+        logits = outputs.get("logits")  # path, batch, max_len, 151667
+        sampled_evidence_sentence = outputs.get("evidence_sentences")
+        #####################################################################
+        #               형태 바꾸기
+        #####################################################################
+        r_batch_size = mask.size(0)
+        sampled_evidence_scores = sampled_evidence_scores.view(r_batch_size, config.beam_size, config.max_dec_len, -1)
+        #####################################################################
+        #              먼저 답변 부터 생성
+        #####################################################################
+        predicted_answer = self.generate_sentences(
+            model, inputs, r_batch_size, loss, sampled_evidence_scores, mask, logits, sampled_evidence_sentence
+        )
 
         return (loss, outputs) if return_outputs else loss
 
@@ -172,7 +264,7 @@ if __name__ == "__main__":
     ##############################################################
     #               model param 추가할 내용
     ##############################################################
-    config.beam_size = 5
+    config.beam_size = 3
     config.max_dec_len = 2
 
     tokenizer, model = create_model(model_path, config)
@@ -212,8 +304,8 @@ if __name__ == "__main__":
     training_params = TrainingArguments(
         output_dir="qwen_lora_2020",
         num_train_epochs=1,
-        per_device_train_batch_size=4,  # 수정했음
-        gradient_accumulation_steps=2,
+        per_device_train_batch_size=2,  # 수정했음
+        gradient_accumulation_steps=1,
         warmup_ratio=0.1,
         learning_rate=1e-4,
         logging_steps=10,

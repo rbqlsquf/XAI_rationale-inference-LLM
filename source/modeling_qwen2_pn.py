@@ -22,6 +22,7 @@ from transformers.modeling_outputs import (
 
 from transformers.models.qwen2.configuration_qwen2 import Qwen2Config
 from transformers import AutoTokenizer
+from dataclasses import dataclass
 
 
 class BeamSearchAttentionDecoder(nn.Module):
@@ -269,7 +270,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             # 신경써야할 부분 -> 문장들이 있는 경우(이 때 질문 instruction 부분 제외)
             # mm : [batch, max_sent]
             mm = 1 - sent_attention_masks
-
+            mm = mm.unsqueeze(1).expand(-1, self.max_dec_len, -1)
             # 이제 진짜 필요없는 부분에 대해서 엄청 큰 음수값을 넣어줌
             # sent_attention_masks : [batch, 1, max_sent]
             sent_attention_masks = (
@@ -341,44 +342,62 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
                     evidence_sentences,
                 )
 
-        evidence_vector = decoder_inputs.view(-1, self.beam_size, self.hidden_size)
-        evidence_sentences = torch.tensor(evidence_sentences, dtype=torch.long).cuda()
-        self.evidence = evidence_vector
-        evidence = evidence_sentences
+            evidence_vector = decoder_inputs.view(-1, self.beam_size, self.hidden_size)
+            evidence_sentences = torch.tensor(evidence_sentences, dtype=torch.long).cuda()
+            self.evidence = evidence_vector
+            attention_scores = attention_scores.squeeze(2).transpose(0, 1)
 
         ##############################################################################
         #                   evidence_vector 만들었음                                  #
         ##############################################################################
         # element 합으로 수정
-        tmp_hidden_states = hidden_states + self.evidence
-        hidden_states = tmp_hidden_states
-        logits = self.lm_head(hidden_states)  # 토큰 중에 최대 값이 나오는 확률 찾기
-        logits = logits.float()
-        # 위 logits가 정답임
+        all_path_logits = []
+        for path in range(self.beam_size):
+            tmp_hidden_states = hidden_states + self.evidence[:, path, :].unsqueeze(1)
+            all_path_logits.append(self.lm_head(tmp_hidden_states).float())
 
         loss = None
-        if labels is not None:
+        if labels is not None:  # 학습하는 과정
             # Shift so that tokens < n predict n
-            shift_logits = logits[..., :-1, :].contiguous()  # logits의 맨 뒤에 하나 뺀거 즉 end 토큰 빼고 나서 걔랑
-            shift_labels = labels[..., 1:].contiguous()  # label에 대한 처음부터 값이 동일해야함..
-            # Flatten the tokens
-            loss_fct = CrossEntropyLoss()
-            shift_logits = shift_logits.view(-1, self.config.vocab_size)
-            shift_labels = shift_labels.view(-1)
-            # Enable model parallelism
-            shift_labels = shift_labels.to(shift_logits.device)
-            loss = loss_fct(shift_logits, shift_labels)
+            label_losses = []
+            # logits : [batch, max_length, vocab]
+            loss_fct = CrossEntropyLoss(reduction="none")
+            for logits in all_path_logits:
+                shift_logits = logits[
+                    ..., :-1, :
+                ].contiguous()  # logits의 맨 뒤에 하나 뺀거 즉 end 토큰 빼고 나서 걔랑
+                shift_labels = labels[..., 1:].contiguous()  # label에 대한 처음부터 값이 동일해야함..
+                # Flatten the tokens
+
+                shift_logits = shift_logits.view(-1, self.config.vocab_size)
+                shift_labels = shift_labels.view(-1)
+                # Enable model parallelism
+                shift_labels = shift_labels.to(shift_logits.device)
+                loss = loss_fct(shift_logits, shift_labels)
+                label_losses.append(loss.view(batch_size, -1))
+                # 최종 loss 계산
+            label_losses = torch.stack(label_losses, 0)
+            span_loss = label_losses
 
         if not return_dict:
             output = (logits,) + outputs[1:]
-            return (loss,) + output if loss is not None else output
+            return (span_loss,) + output if span_loss is not None else output
 
-        return CausalLMOutputWithPast(
-            loss=loss,
-            logits=logits,
+        return CustomCausalLMOutput(
+            loss=span_loss,  # [path, 3484]
+            logits=all_path_logits,  # [path, 2] path에 대한 문장 생성 확률??
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
-            # evidence_sentence =
-            # evidence_logits =
+            evidence_sentences=evidence_sentences,  # [batch*beam_size, dec_len]
+            mask=mm,
+            attention_scores=attention_scores,
         )
+
+
+@dataclass
+class CustomCausalLMOutput(CausalLMOutputWithPast):
+
+    evidence_sentences: Optional[torch.FloatTensor] = None
+    mask: Optional[torch.FloatTensor] = None
+    attention_scores: Optional[torch.LongTensor] = None
