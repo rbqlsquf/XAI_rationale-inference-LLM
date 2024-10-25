@@ -40,6 +40,7 @@ class CustomTrainer(Trainer):
     ):
         # [batch, beam_size, max_dec, -1]
         predicted_answer = []
+        evidence_predicted_answer = []
         for path in range(config.beam_size):
             logit = torch.argmax(logits[path], dim=-1)
 
@@ -54,7 +55,9 @@ class CustomTrainer(Trainer):
             evidence_path = (
                 sampled_evidence_sentence.view(r_batch_size, -1, config.max_dec_len).transpose(0, 1)[path].tolist()
             )
-
+            #####################################################
+            #           근거 문장에 따른 입력 재구성
+            #####################################################
             sample_inputs = []
             for k in range(r_batch_size):
                 # 첫 번째 1의 인덱스 찾기
@@ -84,35 +87,52 @@ class CustomTrainer(Trainer):
                 tmp_input_ids = tmp_input_ids + [tokenizer.eos_token_id] + tokenizer.encode("\n")
                 tmp_sentence_mask.extend([0] * 2)
                 tokens = tokenizer.decode(tmp_input_ids)
-                tmp_attention_mask = torch.ones(len(tmp_input_ids), dtype=torch.long)
+                tmp_attention_mask = torch.ones(len(tmp_input_ids), dtype=torch.long).tolist()
 
                 assert len(tmp_input_ids) == len(tmp_attention_mask) == len(tmp_sentence_mask)
                 # 데이터 추가하는 방법
+
+                tmp_input_ids = tmp_input_ids
+
                 sample_input = {
                     "input_ids": tmp_input_ids,
-                    "attention_mask": tmp_attention_mask.squeeze(dim=0).tolist(),
-                    "sent_masks": tmp_sentence_mask,
                 }
                 sample_inputs.append(sample_input)
             ###############################################
             input_ids = [f.get("input_ids", None) for f in sample_inputs]
-            attention_mask = [f.get("attention_mask", None) for f in sample_inputs]
-            sentence_masks = [f.get("sent_masks", None) for f in sample_inputs]
             max_length = max(len(mask) for mask in input_ids)
             batch = {}
+
             padded_input_ids = [[tokenizer.pad_token_id] * (max_length - len(mask)) + mask for mask in input_ids]
             batch["input_ids"] = torch.tensor(padded_input_ids).cuda()
-            padded_attention_mask = [[0] * (max_length - len(mask)) + mask for mask in attention_mask]
-            batch["attention_mask"] = torch.tensor(padded_attention_mask).cuda()
-            padded_sentence_masks = [[0] * (max_length - len(mask)) + mask for mask in sentence_masks]
-            batch["sent_masks"] = torch.tensor(padded_sentence_masks).cuda()
             ####################################################################
+            e_outputs = model.generate(batch["input_ids"], max_new_tokens=5)  #!!!바꾸기
+            e_decoded_outputs = [
+                tokenizer.decode(output[len(batch["input_ids"][i]) :], skip_special_tokens=True)
+                for i, output in enumerate(e_outputs)
+            ]
 
-            e_label_logits, e_sampled_evidence_sentence = model(
-                input_ids=batch["input_ids"], attention_mask=batch["attention_mask"], sent_masks=batch["sent_masks"]
-            )
+            #####################################################
+            #           근거 문장만 입력으로 했을 때 출력 친구들 넣어주기
+            #####################################################
+            evidence_predicted_answer.append(e_decoded_outputs)
+        #########################################
+        #       beam size에 대해서 predict_answer, evidence_predicted_answer 완료
+        #########################################
+        return predicted_answer, evidence_predicted_answer
 
-        return predicted_answer
+    def compute_evidence_f1_score(self, predicted_answer, evidence_predicted_answer, inputs):
+        # [path, batch]
+        f1_list = [1e-3 for _ in range(config.beam_size)]
+        g_f1_list = [1e-3 for _ in range(config.beam_size)]
+
+        filtered_labels = [labels[labels != -100].tolist() for labels in inputs["labels"]]
+        gold_list = tokenizer.batch_decode(filtered_labels, skip_special_tokens=True)
+        for path in range(config.beam_size):
+            predicted = predicted_answer[path]
+            e_predicted = evidence_predicted_answer[path]
+
+        return 0
 
     def compute_loss(self, model, inputs, return_outputs=False):
         # input을 원하는 대로 수정
@@ -122,7 +142,7 @@ class CustomTrainer(Trainer):
         loss = outputs.get("loss")  # path, batch , 1742(max_sent)
         sampled_evidence_scores = outputs.get("attention_scores")  # batch*path, 2, max_sent??
         mask = outputs.get("mask")  # batch, dec_len, max_sent
-        logits = outputs.get("logits")  # path, batch, max_len, 151667
+        path_logits = outputs.get("path_logits")  # path, batch, max_len, 151667
         sampled_evidence_sentence = outputs.get("evidence_sentences")
         #####################################################################
         #               형태 바꾸기
@@ -132,9 +152,11 @@ class CustomTrainer(Trainer):
         #####################################################################
         #              먼저 답변 부터 생성
         #####################################################################
-        predicted_answer = self.generate_sentences(
-            model, inputs, r_batch_size, loss, sampled_evidence_scores, mask, logits, sampled_evidence_sentence
+        predicted_answer, evidence_predicted_answer = self.generate_sentences(
+            model, inputs, r_batch_size, loss, sampled_evidence_scores, mask, path_logits, sampled_evidence_sentence
         )
+
+        best_path = self.compute_evidence_f1_score(predicted_answer, evidence_predicted_answer, inputs)
 
         return (loss, outputs) if return_outputs else loss
 
@@ -265,7 +287,7 @@ if __name__ == "__main__":
     #               model param 추가할 내용
     ##############################################################
     config.beam_size = 3
-    config.max_dec_len = 2
+    config.max_dec_len = 5
 
     tokenizer, model = create_model(model_path, config)
     data_file = "data/1020data/train_data_1022.json"

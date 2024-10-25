@@ -238,7 +238,9 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         tokenizer.padding_side = "left"
         # [batch, max_length, hidden]
         hidden_states = outputs[0]
-
+        evidence_sentences = None
+        mm = None
+        attention_scores = None
         if self.evidence is None:
             batch_size = input_ids.size(0)
 
@@ -357,6 +359,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             all_path_logits.append(self.lm_head(tmp_hidden_states).float())
 
         loss = None
+        span_loss = None
         if labels is not None:  # 학습하는 과정
             # Shift so that tokens < n predict n
             label_losses = []
@@ -385,13 +388,14 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
 
         return CustomCausalLMOutput(
             loss=span_loss,  # [path, 3484]
-            logits=all_path_logits,  # [path, 2] path에 대한 문장 생성 확률??
+            logits=all_path_logits[0],  # [path, 2] path에 대한 문장 생성 확률??
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
             evidence_sentences=evidence_sentences,  # [batch*beam_size, dec_len]
             mask=mm,
             attention_scores=attention_scores,
+            path_logits=all_path_logits,
         )
 
 
@@ -401,3 +405,4 @@ class CustomCausalLMOutput(CausalLMOutputWithPast):
     evidence_sentences: Optional[torch.FloatTensor] = None
     mask: Optional[torch.FloatTensor] = None
     attention_scores: Optional[torch.LongTensor] = None
+    path_logits: Optional[torch.LongTensor] = None
