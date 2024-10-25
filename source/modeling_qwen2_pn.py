@@ -364,23 +364,27 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             # Shift so that tokens < n predict n
             label_losses = []
             # logits : [batch, max_length, vocab]
-            loss_fct = CrossEntropyLoss(reduction="none")
-            for logits in all_path_logits:
-                shift_logits = logits[
-                    ..., :-1, :
-                ].contiguous()  # logits의 맨 뒤에 하나 뺀거 즉 end 토큰 빼고 나서 걔랑
-                shift_labels = labels[..., 1:].contiguous()  # label에 대한 처음부터 값이 동일해야함..
-                # Flatten the tokens
+            loss_fct = CrossEntropyLoss()
 
-                shift_logits = shift_logits.view(-1, self.config.vocab_size)
-                shift_labels = shift_labels.view(-1)
-                # Enable model parallelism
-                shift_labels = shift_labels.to(shift_logits.device)
-                loss = loss_fct(shift_logits, shift_labels)
-                label_losses.append(loss.view(batch_size, -1))
+            for logits in all_path_logits:
+                batch_loss = []
+                for batch_idx in range(batch_size):
+                    shift_logits = logits[
+                        ..., :-1, :
+                    ].contiguous()  # logits의 맨 뒤에 하나 뺀거 즉 end 토큰 빼고 나서 걔랑
+                    shift_labels = labels[..., 1:].contiguous()  # label에 대한 처음부터 값이 동일해야함..
+                    # Flatten the tokens
+
+                    shift_logits = shift_logits.view(-1, self.config.vocab_size)
+                    shift_labels = shift_labels.view(-1)
+                    # Enable model parallelism
+                    shift_labels = shift_labels.to(shift_logits.device)
+                    loss = loss_fct(shift_logits, shift_labels)
+                    batch_loss.append(loss)
                 # 최종 loss 계산
-            label_losses = torch.stack(label_losses, 0)
-            span_loss = label_losses
+                label_losses.append(batch_loss)
+            label_losses = torch.tensor(label_losses)
+            span_loss = label_losses.cuda()
 
         if not return_dict:
             output = (logits,) + outputs[1:]

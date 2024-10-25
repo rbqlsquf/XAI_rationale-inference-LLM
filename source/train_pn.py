@@ -108,7 +108,7 @@ class CustomTrainer(Trainer):
             padded_input_ids = [[tokenizer.pad_token_id] * (max_length - len(mask)) + mask for mask in input_ids]
             batch["input_ids"] = torch.tensor(padded_input_ids).cuda()
             ####################################################################
-            e_outputs = model.generate(batch["input_ids"], max_new_tokens=5)  #!!!바꾸기
+            e_outputs = model.generate(batch["input_ids"], max_new_tokens=200)  #!!!바꾸기
             e_decoded_outputs = [
                 tokenizer.decode(output[len(batch["input_ids"][i]) :], skip_special_tokens=True)
                 for i, output in enumerate(e_outputs)
@@ -150,7 +150,7 @@ class CustomTrainer(Trainer):
         return best_path, f1_list, g_f1_list
 
     def compute_evidence_loss(
-        self, r_batch_size, best_path, f1_list, g_f1_list, sampled_evidence_scores, sampled_evidence_sentence
+        self, r_batch_size, best_path, f1_list, g_f1_list, sampled_evidence_scores, sampled_evidence_sentence, mask
     ):
         s_sampled_evidence_sentence = torch.zeros(
             [config.beam_size, r_batch_size, config.max_dec_len, sampled_evidence_scores.size(-1)],
@@ -160,37 +160,49 @@ class CustomTrainer(Trainer):
             [config.beam_size, r_batch_size, config.max_dec_len, sampled_evidence_scores.size(-1)],
             dtype=torch.long,
         ).cuda()
+        r_sampled_evidence_sentence = sampled_evidence_sentence.view(-1, config.beam_size, config.max_dec_len)
 
         for idx in range(config.beam_size):
-
             sampled_sampled_evidence_sentence = F.one_hot(
-                sampled_evidence_sentence[idx, :], num_classes=sampled_evidence_scores.size(-1)
-            ).unsqueeze(0)
+                r_sampled_evidence_sentence[:, idx, :], num_classes=sampled_evidence_scores.size(-1)
+            )
             negative_sampled_evidence_sentence = torch.sum(sampled_sampled_evidence_sentence, 1, keepdim=True)
             f1 = f1_list[idx]
             g_f1 = g_f1_list[idx]
 
+            ##################################################################
+            # batch단위로 진행해야함
+            ##################################################################
             # Evidence Vector based Answer <=> Evidence Sentence based Answer
             #                  Gold Answer <=> Evidence Sentence based Answer
 
             # 점수가 낮은 경우 추론된 Evidence Sentence를 제외한 모든 문장의 확률을 높이도록
-            if f1.item() < 0.5:
-                s_sampled_evidence_sentence[idx, :, :] = mask - negative_sampled_evidence_sentence
-                f1_list[idx] = 1 - f1
-            # 점수가 높을 경우 추론된 Evidence Sentence 확률을 높이도록
-            else:
-                s_sampled_evidence_sentence[idx, :, :] = sampled_sampled_evidence_sentence
-            if g_f1.item() < 0.5:
-                g_sampled_evidence_sentence[idx, :, :] = mask - negative_sampled_evidence_sentence
-                g_f1_list[idx] = 1 - g_f1
-            else:
-                g_sampled_evidence_sentence[idx, :, :] = sampled_sampled_evidence_sentence
+            for batch_idx in range(r_batch_size):
+                if f1[batch_idx].item() < 0.5:
+                    s_sampled_evidence_sentence[idx, batch_idx, :, :] = (
+                        mask[batch_idx, :, :] - negative_sampled_evidence_sentence[batch_idx]
+                    )
+                    f1_list[idx][batch_idx] = 1 - f1[batch_idx]
+                # 점수가 높을 경우 추론된 Evidence Sentence 확률을 높이도록
+                else:
+                    s_sampled_evidence_sentence[idx, batch_idx, :, :] = sampled_sampled_evidence_sentence[
+                        batch_idx, :, :
+                    ]
+                if g_f1[batch_idx].item() < 0.5:
+                    g_sampled_evidence_sentence[idx, batch_idx, :, :] = (
+                        mask[batch_idx, :, :] - negative_sampled_evidence_sentence[batch_idx]
+                    )
+                    g_f1_list[idx][batch_idx] = 1 - g_f1[batch_idx]
+                else:
+                    g_sampled_evidence_sentence[idx, batch_idx, :, :] = sampled_sampled_evidence_sentence[
+                        batch_idx, :, :
+                    ]
 
         e_div = torch.sum(s_sampled_evidence_sentence, -1)
         g_div = torch.sum(g_sampled_evidence_sentence, -1)
 
-        evidence_nll = -F.log_softmax(sampled_evidence_scores, -1)
-        g_evidence_nll = -F.log_softmax(sampled_evidence_scores, -1)
+        evidence_nll = -F.log_softmax(sampled_evidence_scores, -1).transpose(0, 1)
+        g_evidence_nll = -F.log_softmax(sampled_evidence_scores, -1).transpose(0, 1)
 
         evidence_nll = evidence_nll * s_sampled_evidence_sentence
         g_evidence_nll = g_evidence_nll * g_sampled_evidence_sentence
@@ -230,16 +242,19 @@ class CustomTrainer(Trainer):
         )
 
         evidence_nll, g_evidence_nll = self.compute_evidence_loss(
-            r_batch_size, best_path, f1_list, g_f1_list, sampled_evidence_scores, sampled_evidence_sentence
+            r_batch_size, best_path, f1_list, g_f1_list, sampled_evidence_scores, sampled_evidence_sentence, mask
         )
+        column_indices = torch.arange(best_path.size(0), device="cuda")
         if torch.mean(evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000:
             loss = loss + 0.1 * evidence_nll
         if torch.mean(g_evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000:
             loss = loss + 0.1 * g_evidence_nll
-        if torch.mean(loss).item() > 0 and torch.mean(loss).item() < 1000:
-            loss[best_path].backward()
 
-        return (loss[best_path], outputs) if return_outputs else loss[best_path]
+        return (
+            (loss[column_indices, best_path].mean(), outputs)
+            if return_outputs
+            else loss[column_indices, best_path].mean()
+        )
 
 
 def create_model(model_path, config):
