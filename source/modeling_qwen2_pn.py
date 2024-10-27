@@ -241,9 +241,10 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         evidence_sentences = None
         mm = None
         attention_scores = None
+        batch_size = input_ids.size(0)
+        Flag = False
         if self.evidence is None:
-            batch_size = input_ids.size(0)
-
+            Flag = True
             # positions [batch, 3] -> 첫번째는 system, user, assistant
             # 위에 내용에 대해서는 target_value 즉, assistant 시작하는 부분을 찾기 위한 함수였음
             # [batch, max_sent, max_length]
@@ -360,7 +361,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
 
         loss = None
         span_loss = None
-        if labels is not None:  # 학습하는 과정
+        if labels is not None and Flag == True:  # 학습하는 과정
             # Shift so that tokens < n predict n
             label_losses = []
             # logits : [batch, max_length, vocab]
@@ -387,7 +388,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             span_loss = label_losses.cuda()
 
         if not return_dict:
-            output = (logits,) + outputs[1:]
+            output = (all_path_logits[0],) + outputs[1:]
             return (span_loss,) + output if span_loss is not None else output
 
         return CustomCausalLMOutput(

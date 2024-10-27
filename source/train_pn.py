@@ -62,9 +62,9 @@ class CustomTrainer(Trainer):
             #           근거 문장에 따른 입력 재구성
             #####################################################
             sample_inputs = []
+            real_input_len = []
             for k in range(r_batch_size):
                 # 첫 번째 1의 인덱스 찾기
-
                 #############################################################
                 #                   sentence_group에 대한 내용
                 #############################################################
@@ -87,32 +87,68 @@ class CustomTrainer(Trainer):
                     )
                 sentences = inputs["input_ids"][k][see_tokens]
                 tmp_input_ids = sentences.tolist()
-                tmp_input_ids = tmp_input_ids + [tokenizer.eos_token_id] + tokenizer.encode("\n")
-                tmp_sentence_mask.extend([0] * 2)
+                ignore_padding_index = (inputs["labels"][k] == -100).nonzero(as_tuple=True)[0]
+                tmp_labels = [IGNORE_INDEX] * (len(tmp_input_ids) + 2)  # 엔터랑 eos까지 더해주기
+                real_input_len.append(len(tmp_input_ids) + 2)
+                if ignore_padding_index.numel() > 0:
+                    tmp_input_ids = (
+                        tmp_input_ids
+                        + [tokenizer.eos_token_id]
+                        + tokenizer.encode("\n")
+                        + inputs["labels"][k][ignore_padding_index[-1] + 1 :].tolist()
+                    )
+                    tmp_labels = tmp_labels + inputs["labels"][k][ignore_padding_index[-1] + 1 :].tolist()
+                else:
+                    tmp_input_ids = (
+                        tmp_input_ids
+                        + [tokenizer.eos_token_id]
+                        + tokenizer.encode("\n")
+                        + inputs["labels"][k].tolist()
+                    )
+                    tmp_labels = tmp_labels + inputs["labels"][k].tolist()
+                tmp_sentence_mask.extend([0] * (len(tmp_input_ids) - len(tmp_sentence_mask)))
                 tokens = tokenizer.decode(tmp_input_ids)
                 tmp_attention_mask = torch.ones(len(tmp_input_ids), dtype=torch.long).tolist()
-
-                assert len(tmp_input_ids) == len(tmp_attention_mask) == len(tmp_sentence_mask)
+                assert len(tmp_input_ids) == len(tmp_attention_mask) == len(tmp_sentence_mask) == len(tmp_labels)
                 # 데이터 추가하는 방법
-
-                tmp_input_ids = tmp_input_ids
 
                 sample_input = {
                     "input_ids": tmp_input_ids,
+                    "attention_mask": tmp_attention_mask,
+                    "sent_masks": tmp_sentence_mask,
+                    "labels": tmp_labels,
                 }
                 sample_inputs.append(sample_input)
             ###############################################
             input_ids = [f.get("input_ids", None) for f in sample_inputs]
+            attention_mask = [f.get("attention_mask", None) for f in sample_inputs]
+            sentence_masks = [f.get("sent_masks", None) for f in sample_inputs]
+            labels = [f.get("labels", None) for f in sample_inputs]
+
             max_length = max(len(mask) for mask in input_ids)
             batch = {}
 
             padded_input_ids = [[tokenizer.pad_token_id] * (max_length - len(mask)) + mask for mask in input_ids]
             batch["input_ids"] = torch.tensor(padded_input_ids).cuda()
+            padded_attention_mask = [[0] * (max_length - len(mask)) + mask for mask in attention_mask]
+            batch["attention_mask"] = torch.tensor(padded_attention_mask).cuda()
+            padded_sentence_masks = [[0] * (max_length - len(mask)) + mask for mask in sentence_masks]
+            batch["sent_masks"] = torch.tensor(padded_sentence_masks).cuda()
+            padded_labels = [[IGNORE_INDEX] * (max_length - len(mask)) + mask for mask in labels]
+            batch["labels"] = torch.tensor(padded_labels).cuda()
             ####################################################################
-            e_outputs = model.generate(batch["input_ids"], max_new_tokens=200)  #!!!바꾸기
+            e_outputs = model(
+                input_ids=batch["input_ids"],
+                attention_mask=batch["attention_mask"],
+                sent_masks=batch["sent_masks"],
+                labels=batch["labels"],
+            )
+            e_logits = e_outputs.get("logits")  # path, batch , 1742(max_sent)
+            argmax_e_logits = torch.argmax(e_logits, dim=-1)
+
             e_decoded_outputs = [
-                tokenizer.decode(output[len(batch["input_ids"][i]) :], skip_special_tokens=True)
-                for i, output in enumerate(e_outputs)
+                tokenizer.decode(output[real_input_len[i] :], skip_special_tokens=True)
+                for i, output in enumerate(argmax_e_logits)
             ]
 
             #####################################################
@@ -234,6 +270,7 @@ class CustomTrainer(Trainer):
         #####################################################################
         #              먼저 답변 부터 생성
         #####################################################################
+        # path, batch
         predicted_answer, evidence_predicted_answer = self.generate_sentences(
             model, inputs, r_batch_size, loss, sampled_evidence_scores, mask, path_logits, sampled_evidence_sentence
         )
@@ -245,7 +282,7 @@ class CustomTrainer(Trainer):
         evidence_nll, g_evidence_nll = self.compute_evidence_loss(
             r_batch_size, best_path, f1_list, g_f1_list, sampled_evidence_scores, sampled_evidence_sentence, mask
         )
-        column_indices = torch.arange(best_path.size(0), device="cuda")
+        column_indices = torch.arange(config.beam_size, device="cuda")
         if torch.mean(evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000:
             loss = loss + 0.1 * evidence_nll
         if torch.mean(g_evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000:
@@ -389,10 +426,11 @@ if __name__ == "__main__":
     parser.add_argument("--new_model", type=str, default="new_model")
     parser.add_argument("--wandb_project", type=str, default="llm pointer network")
     parser.add_argument("--wandb_run_name", type=str, default="1025")
-    parser.add_argument("--output_dir", type=str, default="/hdd/rbqlsquf/qwen_lora_1025")
+    parser.add_argument("--output_dir", type=str, default="qwen_lora_1026")
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
+    parser.add_argument("--data_sample", type=bool, default=True)
     args = parser.parse_args()
 
     #########################################################
@@ -408,6 +446,8 @@ if __name__ == "__main__":
     data_file = args.data_file
     print("학습 데이터 : ", data_file)
     dataset = Dataset.from_json(data_file)
+    if args.data_sample == True:
+        dataset = dataset.select(range(100))
     processed_dataset = dataset.map(lambda example: process_func(example, tokenizer))
 
     new_model = args.new_model
