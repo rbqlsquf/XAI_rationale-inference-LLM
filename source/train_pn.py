@@ -430,7 +430,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--data_sample", type=bool, default=True)
+    parser.add_argument("--data_sample", type=bool, default=False)
     args = parser.parse_args()
 
     #########################################################
@@ -446,7 +446,7 @@ if __name__ == "__main__":
     data_file = args.data_file
     print("학습 데이터 : ", data_file)
     dataset = Dataset.from_json(data_file)
-    if args.data_sample == True:
+    if args.data_sample:
         dataset = dataset.select(range(100))
     processed_dataset = dataset.map(lambda example: process_func(example, tokenizer))
 
@@ -498,3 +498,4 @@ if __name__ == "__main__":
     )
     trainer.train()
     trainer.save_model(new_model)
+    model.save_pretrained("qwen_all_weight")
