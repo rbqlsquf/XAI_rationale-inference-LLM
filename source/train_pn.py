@@ -420,7 +420,7 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--data_file", type=str, default="data/1020data/train_data_1022.json")
+    parser.add_argument("--data_file", type=str, default="data/1022data/hotpot_cnn_6k.json")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
     parser.add_argument("--new_model", type=str, default="new_model")
