@@ -11,6 +11,7 @@ from transformers.cache_utils import Cache, DynamicCache, StaticCache
 from transformers.modeling_attn_mask_utils import (
     AttentionMaskConverter,
 )
+
 from transformers import Qwen2ForCausalLM
 import torch.nn as nn
 from transformers.modeling_outputs import (
@@ -23,6 +24,8 @@ from transformers.modeling_outputs import (
 from transformers.models.qwen2.configuration_qwen2 import Qwen2Config
 from transformers import AutoTokenizer
 from dataclasses import dataclass
+
+import os
 
 
 class BeamSearchAttentionDecoder(nn.Module):
@@ -197,6 +200,12 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         self.gru = BeamSearchAttentionDecoder(config.hidden_size, self.max_sent, self.beam_size)
         self.max_dec_len = config.max_dec_len
         self.hidden_size = config.hidden_size
+
+    def save_pn_model(self, model_path):
+        torch.save(self.gru.state_dict(), os.path.join(model_path, "model.pt"))
+
+    def load_pn_model(self, model_path):
+        self.gru.load_state_dict(torch.load(os.path.join(model_path, "model.pt")))
 
     def forward(
         self,

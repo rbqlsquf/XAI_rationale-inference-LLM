@@ -1,4 +1,4 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
 
 import torch
 from tqdm import tqdm
@@ -6,22 +6,17 @@ import json
 from peft import PeftModel, PeftConfig
 from datasets import Dataset
 
-from modeling_qwen2_pn import Qwen2ForCausalLM
+from modeling_qwen2_pn import Qwen2ForCausalLM_pn
 import argparse
 
 
-def create_model(base_model_path, lora_path):
+def create_model(base_model_path, lora_path, config):
     tokenizer = AutoTokenizer.from_pretrained(base_model_path)
-
-    # AutoModelForCausalLM -> Qwen2ForCausalLM
-    base_model = Qwen2ForCausalLM.from_pretrained(base_model_path, device_map="auto")
-    new_special_tokens = {"additional_special_tokens": ["<|mrc|>", "<|summary|>"]}
-    tokenizer.add_special_tokens(new_special_tokens)
-    base_model.resize_token_embeddings(len(tokenizer))
-    base_model.config.use_cache = False
+    trained_model = Qwen2ForCausalLM_pn.from_pretrained(lora_path, config=config, device_map="auto")
+    trained_model.config.use_cache = False
     tokenizer.padding_side = "left"
-    peft_model = PeftModel.from_pretrained(base_model, lora_path)
-    return tokenizer, peft_model
+    trained_model.load_pn_model(lora_path)
+    return tokenizer, trained_model
 
 
 class InferenceInput:
@@ -77,7 +72,6 @@ def generate_batch_answer(batches, tokenizer, model):
             model.model.evidence = None
             outputs = model.generate(
                 **inputs,
-                sentence_masks=0,  # 여기다가 넣으셈
                 max_new_tokens=512,
             )
 
@@ -121,14 +115,16 @@ if __name__ == "__main__":
     # model_path = args.model_path
     # output_path = args.output_path
 
-    model_path = "model/mean/checkpoint-1000"
+    model_path = "new_model"
     output_path = "result/mean/hotpot_1000.json"
     ##########################################
 
     base_model_path = "Qwen/Qwen2.5-3B-Instruct"
+    config = AutoConfig.from_pretrained(base_model_path)
+    config.beam_size = 1
+    config.max_dec_len = 3
 
-    tokenizer, model = create_model(base_model_path, model_path)
-
+    tokenizer, model = create_model(base_model_path, model_path, config)
     file_path = "data/1008data/hotpot_dev.json"
     batch_size = 16
     print(batch_size)

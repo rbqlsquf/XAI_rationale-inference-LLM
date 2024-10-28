@@ -10,7 +10,7 @@ from transformers import (
     TrainingArguments,
     Trainer,
 )
-
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 from peft import LoraConfig, get_peft_model
 import wandb
 from modeling_qwen2_pn import Qwen2ForCausalLM_pn
@@ -38,6 +38,11 @@ class CustomDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
 
 
 class CustomTrainer(Trainer):
+
+    def save_model(self, output_dir: Optional[str] = None, _internal_call: bool = False):
+        super().save_model(output_dir, _internal_call)
+        self.model.model.save_pn_model(output_dir)
+
     def generate_sentences(
         self, model, inputs, r_batch_size, loss, sampled_evidence_scores, mask, logits, sampled_evidence_sentence
     ):
@@ -298,9 +303,6 @@ class CustomTrainer(Trainer):
 def create_model(model_path, config):
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     model = Qwen2ForCausalLM_pn.from_pretrained(model_path, config=config, device_map="cuda")
-    new_special_tokens = {"additional_special_tokens": ["<|mrc|>", "<|summary|>"]}
-    tokenizer.add_special_tokens(new_special_tokens)
-    model.resize_token_embeddings(len(tokenizer))
     model.enable_input_require_grads()
     model.config.use_cache = False
     tokenizer.padding_side = "left"
@@ -447,7 +449,7 @@ if __name__ == "__main__":
     print("학습 데이터 : ", data_file)
     dataset = Dataset.from_json(data_file)
     if args.data_sample:
-        dataset = dataset.select(range(100))
+        dataset = dataset.select(range(12))
     processed_dataset = dataset.map(lambda example: process_func(example, tokenizer))
 
     new_model = args.new_model
@@ -498,4 +500,3 @@ if __name__ == "__main__":
     )
     trainer.train()
     trainer.save_model(new_model)
-    model.save_pretrained("qwen_all_weight")
