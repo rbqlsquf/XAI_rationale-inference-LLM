@@ -115,12 +115,12 @@ def generate_batch_answer(batches, tokenizer, model):
         input_batch["sent_masks"] = torch.tensor(padded_sentence_masks).cuda()
 
         with torch.no_grad():
-            model.model.evidence = None
+            model.evidence = None
             outputs = model.generate(
                 input_ids=input_batch["input_ids"],
                 attention_mask=input_batch["attention_mask"],
                 sent_masks=input_batch["sent_masks"],
-                max_new_tokens=512,
+                max_new_tokens=1,
             )
 
         decoded_outputs = [

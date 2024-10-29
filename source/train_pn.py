@@ -142,6 +142,7 @@ class CustomTrainer(Trainer):
             padded_labels = [[IGNORE_INDEX] * (max_length - len(mask)) + mask for mask in labels]
             batch["labels"] = torch.tensor(padded_labels).cuda()
             ####################################################################
+            model.model.evidence = None
             e_outputs = model(
                 input_ids=batch["input_ids"],
                 attention_mask=batch["attention_mask"],
@@ -420,7 +421,7 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--data_file", type=str, default="data/hotpot_cnn_6k.json")
+    parser.add_argument("--data_file", type=str, default="data/1022data/hotpot_cnn_6k.json")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
     parser.add_argument("--new_model", type=str, default="new_model")
@@ -430,7 +431,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--data_sample", type=bool, default=False)
+    parser.add_argument("--data_sample", type=bool, default=True)
     args = parser.parse_args()
     print(args)
     #########################################################
