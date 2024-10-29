@@ -207,6 +207,14 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
     def load_pn_model(self, model_path):
         self.gru.load_state_dict(torch.load(os.path.join(model_path, "model.pt")))
 
+    # def generate(self, input_ids, **kwargs):
+    #     # 새로운 인자 처리 예시
+    #     sent_masks = kwargs.get("sent_masks", None)  # 추가 인자 예시
+    #     # 필요한 로직을 여기에 추가
+    #     # 예를 들어, new_arg를 사용할 수 있도록 모델 forward 함수에 추가
+    #     outputs = super().generate(input_ids, **kwargs)
+    #     return outputs
+
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -221,6 +229,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         sent_masks: Optional[torch.Tensor] = None,
+        **kwargs,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -242,9 +251,8 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             cache_position=cache_position,
         )
         tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-3B-Instruct")
-        new_special_tokens = {"additional_special_tokens": ["<|mrc|>", "<|summary|>"]}
-        tokenizer.add_special_tokens(new_special_tokens)
         tokenizer.padding_side = "left"
+
         # [batch, max_length, hidden]
         hidden_states = outputs[0]
         evidence_sentences = None
@@ -411,6 +419,51 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             attention_scores=attention_scores,
             path_logits=all_path_logits,
         )
+
+    def prepare_inputs_for_generation(
+        self,
+        input_ids,
+        past_key_values=None,
+        attention_mask=None,
+        inputs_embeds=None,
+        cache_position=None,
+        position_ids=None,
+        use_cache=True,
+        **kwargs,
+    ):
+        # If we have cache: let's slice `input_ids` through `cache_position`, to keep only the unprocessed tokens
+        # Exception 1: when passing input_embeds, input_ids may be missing entries
+        # Exception 2: some generation methods do special slicing of input_ids, so we don't need to do it here
+        if past_key_values is not None:
+            if inputs_embeds is not None:  # Exception 1
+                input_ids = input_ids[:, -cache_position.shape[0] :]
+            elif input_ids.shape[1] != cache_position.shape[0]:  # Default case (the "else", a no op, is Exception 2)
+                input_ids = input_ids[:, cache_position]
+
+        if attention_mask is not None and position_ids is None:
+            # create position_ids on the fly for batch generation
+            position_ids = attention_mask.long().cumsum(-1) - 1
+            position_ids.masked_fill_(attention_mask == 0, 1)
+            if past_key_values:
+                position_ids = position_ids[:, -input_ids.shape[1] :]
+
+        # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
+        if inputs_embeds is not None and cache_position[0] == 0:
+            model_inputs = {"inputs_embeds": inputs_embeds}
+        else:
+            model_inputs = {"input_ids": input_ids.contiguous()}  # `contiguous()` needed for compilation use cases
+
+        model_inputs.update(
+            {
+                "position_ids": position_ids,
+                "cache_position": cache_position,
+                "past_key_values": past_key_values,
+                "use_cache": use_cache,
+                "attention_mask": attention_mask,
+                "sent_masks": kwargs["sent_masks"],
+            }
+        )
+        return model_inputs
 
 
 @dataclass
