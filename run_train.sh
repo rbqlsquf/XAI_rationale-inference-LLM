@@ -13,4 +13,3 @@ $PYTHON_PATH $SOURCE_DIR/train_pn.py \
     --num_train_epochs 1 \
     --batch_size 4 \
     --gradient_accumulation_steps 1 \
-    --data_sample False
