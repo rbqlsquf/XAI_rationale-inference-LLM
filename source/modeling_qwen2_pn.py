@@ -259,25 +259,29 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         mm = None
         attention_scores = None
         batch_size = input_ids.size(0)
-        Flag = False
+        Flag = False #학습하는 과정에서 loss 출력할지 말지를 고민(학습단에서 model에 2번 진입하기 때문)
+        
+        ##############################################################################
+        #                           입력부에 대한 pointer network 계산
+        ##############################################################################
         if self.evidence is None:
             Flag = True
             # positions [batch, 3] -> 첫번째는 system, user, assistant
             # 위에 내용에 대해서는 target_value 즉, assistant 시작하는 부분을 찾기 위한 함수였음
-            # [batch, max_sent, max_length]
-
+            
+            # sentence_masks : [batch, max_sent, max_length]
             sentence_masks = F.one_hot(sent_masks).transpose(1, 2).float()
             max_sent = sentence_masks.size(1)
-            # div_term : [batch, max_sent, 1]
+            # div_term : [batch, max_sent, 1] : 문장들이 있는 곳에는 숫자값, 없는 곳에는 작은 소수
             div_term = torch.sum(sentence_masks, dim=-1, keepdim=True)
             div_term = div_term.masked_fill(div_term == 0, 1e-10)
-
+            #sentence_representation : [batch, max_sent, max_length] * [batch, max_length, hidden]  -> [batch, max_sent, hidden]
             sentence_representation = sentence_masks.bmm(hidden_states)
             sentence_representation = sentence_representation / div_term
 
             # sentence_representation : [batch, max_sent, hidden]
             sentence_representation = self.dropout(sentence_representation)
-            # 문장들이 없는 곳에 1을 넣는거임... 왜? 무시할 곳에 1을 넣음 -> 나중에 디코딩단계에서 확률을 낮춰주기 위함
+            # 문장 없는 곳에 1, 있는 곳에 0
             sent_attention_masks = (
                 div_term.masked_fill(div_term != 1e-10, 0).masked_fill(div_term == 1e-10, 1).squeeze(dim=2).bool()
             )
@@ -292,7 +296,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             mm = 1 - sent_attention_masks
             mm = mm.unsqueeze(1).expand(-1, self.max_dec_len, -1)
             # 이제 진짜 필요없는 부분에 대해서 엄청 큰 음수값을 넣어줌
-            # sent_attention_masks : [batch, 1, max_sent]
+            # sent_attention_masks : [batch, 1, max_sent] -> 확률값을 조정하기 위함으로 필요없는 문장들이 pointer nework에서 나오지 않게 하기 위함
             sent_attention_masks = (
                 sent_attention_masks.masked_fill(sent_attention_masks == 1, -1e10)
                 .masked_fill(sent_attention_masks == 0, 0)
@@ -304,7 +308,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             encoder_outputs = sentence_representation
 
             ################################################################################
-            # im_start 위치를 찾고 decoding 하는 단계
+            #               im_start 위치를 찾고 decoding 하는 단계
             ################################################################################
             target_value = tokenizer.encode("<|im_start|>")[0]
             mask = torch.eq(input_ids, target_value)
@@ -318,22 +322,19 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             decoder_inputs = []
             for i in range(batch_size):
                 if positions[i][2] == 0:  # first inference
-                    values = hidden_states[i][positions[i][1] :]
                     decoder_inputs.append(hidden_states[i][-1, :])
                 else:  # train
-                    values = hidden_states[i][positions[i][1] : positions[i][2]]
-
-                    # 전체 입력에서 마지막에 해당하는 벡터 값을 가지고 오기 위함...
+                    # 전체 입력에서 마지막에 해당하는 벡터 값을 가지고 오기 위함
                     decoder_inputs.append(hidden_states[i][positions[i][2] - 1, :])
 
-            # decoder_inputs : [batch, hidden]
+            # decoder_inputs : [batch, hidden] -> [batch, 1, hidden]
             decoder_inputs = torch.stack(decoder_inputs, 0)
             decoder_inputs = decoder_inputs.unsqueeze(dim=1)
 
             #################################################
             #           입력을 topk 만큼 복제
             #################################################
-            # [batch, 1, hidden] -> [batch *topk, 1, hidden] -> 묶음으로 repeat됨
+            # [batch, 1, hidden] -> [batch, topk, hidden]  -> [batch *topk, 1, hidden] -> 묶음으로 repeat됨 앞에 단위를 게속 반복하는 느낌
             decoder_inputs = decoder_inputs.repeat(1, self.beam_size, 1).view(-1, 1, self.hidden_size)
             encoder_outputs = encoder_outputs.repeat(1, self.beam_size, 1, 1).view(-1, max_sent, self.hidden_size)
             sent_attention_masks = sent_attention_masks.repeat(1, self.beam_size, 1).view(-1, 1, max_sent)
