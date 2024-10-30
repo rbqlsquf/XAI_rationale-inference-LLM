@@ -142,8 +142,10 @@ def write_result(output_path):
             result = {}
             result["_id"] = item._id
             result["input_text"] = item.input_text
-            if "assistant" in item.generated_text:
+            if "assistant\n" in item.generated_text:
                 result["generated_text"] = item.generated_text.split("assistant\n")[1]
+            elif "assistant" in item.generated_text:
+                result["generated_text"] = item.generated_text.split("assistant")[1]
             else:
                 result["generated_text"] = item.generated_text
             result["answer"] = item.answer
@@ -193,4 +195,4 @@ if __name__ == "__main__":
     answer_batches = generate_batch_answer(batches, tokenizer, model)
     #### 답변작성
 
-    write_result(args.output_path)
+    write_result(args.output_dir)

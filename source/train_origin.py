@@ -110,14 +110,7 @@ if __name__ == "__main__":
 
     model_path = "Qwen/Qwen2.5-3B-Instruct"
     tokenizer, model = create_model(model_path)
-    data_file = "data/train_hotpot_cnn_1022.json"
-
-    dataset = Dataset.from_json(data_file)
-
-    processed_dataset = dataset.map(lambda example: process_func(example, tokenizer))
-
-    new_model = "qwen_hotpot"
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+    data_file = "data/1022data/hotpot_cnn_6k.json"
     peft_config = LoraConfig(
         target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
         lora_alpha=16,
@@ -126,8 +119,15 @@ if __name__ == "__main__":
         bias="none",
         task_type="CAUSAL_LM",
     )
-
     model = get_peft_model(model, peft_config)
+    for name, param in model.named_parameters():
+        print(f"Parameter: {name}, requires_grad: {param.requires_grad}")
+    dataset = Dataset.from_json(data_file)
+
+    processed_dataset = dataset.map(lambda example: process_func(example, tokenizer))
+
+    new_model = "qwen_hotpot"
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
     model.print_trainable_parameters()
     wandb.init(project="qwen llm lora")
