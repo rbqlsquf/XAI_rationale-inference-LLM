@@ -296,6 +296,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             mm = mm.unsqueeze(1).expand(-1, self.max_dec_len, -1)
             # 이제 진짜 필요없는 부분에 대해서 엄청 큰 음수값을 넣어줌
             # sent_attention_masks : [batch, 1, max_sent] -> 확률값을 조정하기 위함으로 필요없는 문장들이 pointer nework에서 나오지 않게 하기 위함
+            # sent_attention_masks : [batch, 1, max_sent] -> 확률값을 조정하기 위함으로 필요없는 문장들이 pointer nework에서 나오지 않게 하기 위함
             sent_attention_masks = (
                 sent_attention_masks.masked_fill(sent_attention_masks == 1, -1e10)
                 .masked_fill(sent_attention_masks == 0, 0)

@@ -69,50 +69,45 @@ class CustomTrainer(Trainer):
             sample_inputs = []
             real_input_len = []
             for k in range(r_batch_size):
-                # 첫 번째 1의 인덱스 찾기
-                #############################################################
-                #                   sentence_group에 대한 내용
-                #############################################################
-                sentence_groups = {}
-                for idx, sentence_num in enumerate(inputs["sent_masks"][k]):
-                    if str(sentence_num) not in sentence_groups:
-                        sentence_groups[str(sentence_num)] = []
-                    sentence_groups[str(sentence_num)].append(idx)
-
-                first_one_index = (inputs["sent_masks"][k] == 1).nonzero(as_tuple=True)[0][0].item()
-                tmp_sentence_mask = [0] * len(inputs["sent_masks"][k][:first_one_index])
-                see_tokens = list(range(0, len(inputs["sent_masks"][k][:first_one_index])))
+                target_value = tokenizer.encode("<|im_start|>")[0]
+                target_value_2 = tokenizer.encode("<|im_end|>")[0]
+                im_start_index = (inputs["input_ids"][k] == target_value).nonzero(as_tuple=True)[0][0].item()
+                im_end_index = (inputs["input_ids"][k] == target_value_2).nonzero(as_tuple=True)[0][0].item()
+                sentences = inputs["input_ids"][k][im_start_index:im_end_index+1]
+                sentences = sentences.tolist() + tokenizer.encode("\n<|im_start|>user\n**Document:\n")
+                tmp_sentence_mask = [0] * len(sentences)
+            
+                see_tokens = []
+                ################################################################
+                #       see_tokens는 근거 문장 자체로 정의
+                ################################################################
                 for j in range(config.max_dec_len):
                     see_tokens.extend(
                         (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
                     )
-
                     tmp_sentence_mask = tmp_sentence_mask + [j + 1] * len(
                         (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
                     )
-                sentences = inputs["input_ids"][k][see_tokens]
-                tmp_input_ids = sentences.tolist()
+                tmp_input_ids =sentences +  inputs["input_ids"][k][see_tokens].tolist() +tokenizer.encode("<|im_end|>\n")
+                tmp_sentence_mask = tmp_sentence_mask + [0] * 2 
                 ignore_padding_index = (inputs["labels"][k] == -100).nonzero(as_tuple=True)[0]
-                tmp_labels = [IGNORE_INDEX] * (len(tmp_input_ids) + 2)  # 엔터랑 eos까지 더해주기
-                real_input_len.append(len(tmp_input_ids) + 2)
+                tmp_labels = [IGNORE_INDEX] * (len(tmp_input_ids))  # 엔터랑 eos까지 더해주기
+                real_input_len.append(len(tmp_input_ids))
                 if ignore_padding_index.numel() > 0:
                     tmp_input_ids = (
                         tmp_input_ids
-                        + [tokenizer.eos_token_id]
-                        + tokenizer.encode("\n")
                         + inputs["labels"][k][ignore_padding_index[-1] + 1 :].tolist()
                     )
                     tmp_labels = tmp_labels + inputs["labels"][k][ignore_padding_index[-1] + 1 :].tolist()
+                    tmp_sentence_mask.extend([0] * len(inputs["labels"][k][ignore_padding_index[-1] + 1 :].tolist()))
                 else:
                     tmp_input_ids = (
                         tmp_input_ids
-                        + [tokenizer.eos_token_id]
-                        + tokenizer.encode("\n")
                         + inputs["labels"][k].tolist()
                     )
                     tmp_labels = tmp_labels + inputs["labels"][k].tolist()
-                tmp_sentence_mask.extend([0] * (len(tmp_input_ids) - len(tmp_sentence_mask)))
-                tokens = tokenizer.decode(tmp_input_ids)
+                    tmp_sentence_mask.extend([0] * len(inputs["labels"][k].tolist()))
+                # tokens = tokenizer.decode(tmp_input_ids)
                 tmp_attention_mask = torch.ones(len(tmp_input_ids), dtype=torch.long).tolist()
                 assert len(tmp_input_ids) == len(tmp_attention_mask) == len(tmp_sentence_mask) == len(tmp_labels)
                 # 데이터 추가하는 방법
@@ -271,30 +266,32 @@ class CustomTrainer(Trainer):
         #####################################################################
         #               형태 바꾸기
         #####################################################################
-        r_batch_size = mask.size(0)
-        sampled_evidence_scores = sampled_evidence_scores.view(r_batch_size, config.beam_size, config.max_dec_len, -1)
-        #####################################################################
-        #              먼저 답변 부터 생성
-        #####################################################################
-        # path, batch
-        predicted_answer, evidence_predicted_answer = self.generate_sentences(
-            model, inputs, r_batch_size, loss, sampled_evidence_scores, mask, path_logits, sampled_evidence_sentence
-        )
+        # r_batch_size = mask.size(0)
+        # sampled_evidence_scores = sampled_evidence_scores.view(r_batch_size, config.beam_size, config.max_dec_len, -1)
+        # #####################################################################
+        # #              먼저 답변 부터 생성
+        # #####################################################################
+        # # path, batch
+        # predicted_answer, evidence_predicted_answer = self.generate_sentences(
+        #     model, inputs, r_batch_size, loss, sampled_evidence_scores, mask, path_logits, sampled_evidence_sentence
+        # )
 
-        best_path, f1_list, g_f1_list = self.compute_evidence_f1_score(
-            predicted_answer, evidence_predicted_answer, inputs, r_batch_size
-        )
+        # best_path, f1_list, g_f1_list = self.compute_evidence_f1_score(
+        #     predicted_answer, evidence_predicted_answer, inputs, r_batch_size
+        # )
 
-        evidence_nll, g_evidence_nll = self.compute_evidence_loss(
-            r_batch_size, best_path, f1_list, g_f1_list, sampled_evidence_scores, sampled_evidence_sentence, mask
-        )
-        column_indices = torch.arange(config.beam_size, device="cuda")
-        if torch.mean(evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000:
-            loss = loss + 0.1 * evidence_nll
-        if torch.mean(g_evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000:
-            loss = loss + 0.1 * g_evidence_nll
+        # evidence_nll, g_evidence_nll = self.compute_evidence_loss(
+        #     r_batch_size, best_path, f1_list, g_f1_list, sampled_evidence_scores, sampled_evidence_sentence, mask
+        # )
+        # column_indices = torch.arange(config.beam_size, device="cuda")
+        # if torch.mean(evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000:
+        #     loss = loss + 0.1 * evidence_nll
+        # if torch.mean(g_evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000:
+        #     loss = loss + 0.1 * g_evidence_nll
 
-        r_loss = loss[column_indices, best_path].mean()
+        # r_loss = loss[column_indices, best_path].mean()
+        
+        r_loss = loss[:, 0].mean()
         r_loss = r_loss.clone().detach().requires_grad_(True)
         return (r_loss, outputs) if return_outputs else r_loss
 
@@ -341,7 +338,7 @@ def process_func(example, tokenizer):
         token_doc["input_ids"] += token_sent["input_ids"]
         token_doc["attention_mask"] += token_sent["attention_mask"]
     token_end = tokenizer("<|im_end|>\n", add_special_tokens=False)
-    sentence_position.extend([sentence_number] * len(token_end))
+    sentence_position.extend([0] * len(token_end))
     token_doc["input_ids"] += token_end["input_ids"]
     token_doc["attention_mask"] += token_end["attention_mask"]
 
@@ -431,7 +428,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--data_sample", type=bool, default=True)
+    parser.add_argument("--data_sample", type=bool, default=False)
     args = parser.parse_args()
     print(args)
     #########################################################
@@ -466,6 +463,8 @@ if __name__ == "__main__":
 
     model.print_trainable_parameters()
     for name, param in model.named_parameters():
+        if "gru" in name:
+            param.requires_grad = True
         print(f"Parameter: {name}, requires_grad: {param.requires_grad}")
 
     ##############################################################
