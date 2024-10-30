@@ -194,7 +194,6 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         # 추가 레이어와 속성
         self.dropout = nn.Dropout(0.1)
         self.max_sent = 60
-        self.test = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
         self.evidence = None
         self.beam_size = config.beam_size
         self.gru = BeamSearchAttentionDecoder(config.hidden_size, self.max_sent, self.beam_size)

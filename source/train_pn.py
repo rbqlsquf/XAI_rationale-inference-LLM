@@ -290,10 +290,10 @@ class CustomTrainer(Trainer):
         #     loss = loss + 0.1 * g_evidence_nll
 
         # r_loss = loss[column_indices, best_path].mean()
-        # r_loss = r_loss.clone().detach().requires_grad_(True)
-        # return (r_loss, outputs) if return_outputs else r_loss
-
-        return (loss, outputs) if return_outputs else loss
+        
+        r_loss = loss[:, 0].mean()
+        r_loss = r_loss.clone().detach().requires_grad_(True)
+        return (r_loss, outputs) if return_outputs else r_loss
 
 
 def create_model(model_path, config):
@@ -428,7 +428,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--data_sample", type=bool, default=True)
+    parser.add_argument("--data_sample", type=bool, default=False)
     args = parser.parse_args()
     print(args)
     #########################################################
@@ -463,6 +463,8 @@ if __name__ == "__main__":
 
     model.print_trainable_parameters()
     for name, param in model.named_parameters():
+        if "gru" in name:
+            param.requires_grad = True
         print(f"Parameter: {name}, requires_grad: {param.requires_grad}")
 
     ##############################################################
