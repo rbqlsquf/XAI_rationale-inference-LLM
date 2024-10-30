@@ -73,10 +73,10 @@ class CustomTrainer(Trainer):
                 target_value_2 = tokenizer.encode("<|im_end|>")[0]
                 im_start_index = (inputs["input_ids"][k] == target_value).nonzero(as_tuple=True)[0][0].item()
                 im_end_index = (inputs["input_ids"][k] == target_value_2).nonzero(as_tuple=True)[0][0].item()
-                sentences = inputs["input_ids"][k][im_start_index:im_end_index+1]
+                sentences = inputs["input_ids"][k][im_start_index : im_end_index + 1]
                 sentences = sentences.tolist() + tokenizer.encode("\n<|im_start|>user\n**Document:\n")
                 tmp_sentence_mask = [0] * len(sentences)
-            
+
                 see_tokens = []
                 ################################################################
                 #       see_tokens는 근거 문장 자체로 정의
@@ -88,23 +88,19 @@ class CustomTrainer(Trainer):
                     tmp_sentence_mask = tmp_sentence_mask + [j + 1] * len(
                         (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
                     )
-                tmp_input_ids =sentences +  inputs["input_ids"][k][see_tokens].tolist() +tokenizer.encode("<|im_end|>\n")
-                tmp_sentence_mask = tmp_sentence_mask + [0] * 2 
+                tmp_input_ids = (
+                    sentences + inputs["input_ids"][k][see_tokens].tolist() + tokenizer.encode("<|im_end|>\n")
+                )
+                tmp_sentence_mask = tmp_sentence_mask + [0] * 2
                 ignore_padding_index = (inputs["labels"][k] == -100).nonzero(as_tuple=True)[0]
                 tmp_labels = [IGNORE_INDEX] * (len(tmp_input_ids))  # 엔터랑 eos까지 더해주기
                 real_input_len.append(len(tmp_input_ids))
                 if ignore_padding_index.numel() > 0:
-                    tmp_input_ids = (
-                        tmp_input_ids
-                        + inputs["labels"][k][ignore_padding_index[-1] + 1 :].tolist()
-                    )
+                    tmp_input_ids = tmp_input_ids + inputs["labels"][k][ignore_padding_index[-1] + 1 :].tolist()
                     tmp_labels = tmp_labels + inputs["labels"][k][ignore_padding_index[-1] + 1 :].tolist()
                     tmp_sentence_mask.extend([0] * len(inputs["labels"][k][ignore_padding_index[-1] + 1 :].tolist()))
                 else:
-                    tmp_input_ids = (
-                        tmp_input_ids
-                        + inputs["labels"][k].tolist()
-                    )
+                    tmp_input_ids = tmp_input_ids + inputs["labels"][k].tolist()
                     tmp_labels = tmp_labels + inputs["labels"][k].tolist()
                     tmp_sentence_mask.extend([0] * len(inputs["labels"][k].tolist()))
                 # tokens = tokenizer.decode(tmp_input_ids)
@@ -290,7 +286,7 @@ class CustomTrainer(Trainer):
         #     loss = loss + 0.1 * g_evidence_nll
 
         # r_loss = loss[column_indices, best_path].mean()
-        
+
         r_loss = loss[:, 0].mean()
         r_loss = r_loss.clone().detach().requires_grad_(True)
         return (r_loss, outputs) if return_outputs else r_loss
