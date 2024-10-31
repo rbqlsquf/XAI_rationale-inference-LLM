@@ -252,13 +252,42 @@ class CustomTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False):
         # input을 원하는 대로 수정
         model.model.evidence = None
-        # 모델에 수정된 inputs 전달
+        
+        if self.label_smoother is not None and "labels" in inputs:
+            labels = inputs.pop("labels")
+        else:
+            labels = None
         outputs = model(**inputs)
-        loss = outputs.get("loss")  # path, batch , 1742(max_sent)
+        # Save past state if it exists
+        # TODO: this needs to be fixed and made cleaner later.
+        if self.args.past_index >= 0:
+            self._past = outputs[self.args.past_index]
+
+        if labels is not None:
+            unwrapped_model = self.accelerator.unwrap_model(model)
+            if self._is_peft_model(unwrapped_model):
+                model_name = unwrapped_model.base_model.model._get_name()
+            else:
+                model_name = unwrapped_model._get_name()
+            # if model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
+            loss = self.label_smoother(outputs, labels, shift_labels=True)
+            # else:
+            #     loss = self.label_smoother(outputs, labels)
+        else:
+            if isinstance(outputs, dict) and "loss" not in outputs:
+                raise ValueError(
+                    "The model did not return a loss from the inputs, only the following keys: "
+                    f"{','.join(outputs.keys())}. For reference, the inputs it received are {','.join(inputs.keys())}."
+                )
+            # We don't use .loss here since the model may return tuples instead of ModelOutput.
+            loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0] # path, batch , 1742(max_sent)
+
+            
         sampled_evidence_scores = outputs.get("attention_scores")  # batch*path, 2, max_sent??
         mask = outputs.get("mask")  # batch, dec_len, max_sent
         path_logits = outputs.get("path_logits")  # path, batch, max_len, 151667
         sampled_evidence_sentence = outputs.get("evidence_sentences")
+        
         #####################################################################
         #               형태 바꾸기
         #####################################################################
@@ -287,8 +316,8 @@ class CustomTrainer(Trainer):
 
         # r_loss = loss[column_indices, best_path].mean()
 
-        r_loss = loss[:, 0].mean()
-        r_loss = r_loss.clone().detach().requires_grad_(True)
+        # r_loss = loss[0, :].mean().requires_grad_(True)
+        r_loss = loss[0]
         return (r_loss, outputs) if return_outputs else r_loss
 
 
@@ -477,7 +506,7 @@ if __name__ == "__main__":
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         warmup_ratio=0.1,
         learning_rate=1e-4,
-        logging_steps=10,
+        logging_steps=1,
         lr_scheduler_type="cosine",
         gradient_checkpointing=True,
         save_steps=1000,
