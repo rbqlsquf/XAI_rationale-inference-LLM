@@ -385,23 +385,23 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             loss_fct = CrossEntropyLoss()
 
             for logits in all_path_logits:
-                batch_loss = []
-                for batch_idx in range(batch_size):
-                    shift_logits = logits[
-                        ..., :-1, :
-                    ].contiguous()  # logits의 맨 뒤에 하나 뺀거 즉 end 토큰 빼고 나서 걔랑
-                    shift_labels = labels[..., 1:].contiguous()  # label에 대한 처음부터 값이 동일해야함..
-                    # Flatten the tokens
+                
+                # for batch_idx in range(batch_size):
+                shift_logits = logits[
+                    ..., :-1, :
+                ].contiguous()  # logits의 맨 뒤에 하나 뺀거 즉 end 토큰 빼고 나서 걔랑
+                shift_labels = labels[..., 1:].contiguous()  # label에 대한 처음부터 값이 동일해야함..
+                # Flatten the tokens
 
-                    shift_logits = shift_logits.view(-1, self.config.vocab_size)
-                    shift_labels = shift_labels.view(-1)
-                    # Enable model parallelism
-                    shift_labels = shift_labels.to(shift_logits.device)
-                    loss = loss_fct(shift_logits, shift_labels)
-                    batch_loss.append(loss)
+                shift_logits = shift_logits.view(-1, self.config.vocab_size)
+                shift_labels = shift_labels.view(-1)
+                # Enable model parallelism
+                shift_labels = shift_labels.to(shift_logits.device)
+                loss = loss_fct(shift_logits, shift_labels)
+                
                 # 최종 loss 계산
-                label_losses.append(batch_loss)
-            label_losses = torch.tensor(label_losses)
+                label_losses.append(loss)
+            label_losses = torch.stack(label_losses, 0)
             span_loss = label_losses.cuda()
 
         if not return_dict:
@@ -409,7 +409,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             return (span_loss,) + output if span_loss is not None else output
 
         return CustomCausalLMOutput(
-            loss=span_loss,  # [path, 3484]
+            loss=label_losses,  # [path, 3484]
             logits=all_path_logits[0],  # [path, 2] path에 대한 문장 생성 확률??
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
