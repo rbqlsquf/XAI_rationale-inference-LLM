@@ -87,7 +87,7 @@ def create_example(all_example, tokenizer, data_sample, mrc_value, sum_value):
             )
         )
         if data_sample:
-            if len(all_result) == 100:
+            if len(all_result) == 10:
                 break
     return all_result
 
@@ -120,28 +120,39 @@ def generate_batch_answer(batches, tokenizer, model):
                 input_ids=input_batch["input_ids"],
                 attention_mask=input_batch["attention_mask"],
                 sent_masks=input_batch["sent_masks"],
-                max_new_tokens=1,
+                max_new_tokens=200,
             )
 
+        input_text = [tokenizer.decode(input_id, skip_special_tokens=True) for i, input_id in enumerate(input_ids)]
+        # decoded_outputs = []
+        # for i, output in enumerate(outputs):
+        #     pad_indices = (output == tokenizer.pad_token_id).nonzero(as_tuple=True)[0]
+        #     if pad_indices.numel() > 0:  # If there is at least one pad_token_id
+        #         last_pad_idx = pad_indices[-1].item()
+        #     else:
+        #         last_pad_idx = 0
+
+        # decoded_outputs.append(tokenizer.decode(output[last_pad_idx+1 + len(input_ids[i]):], skip_special_tokens=True))
+
         decoded_outputs = [
-            tokenizer.decode(output[len(input_ids[i]) :], skip_special_tokens=True) for i, output in enumerate(outputs)
+            tokenizer.decode(output[len(input_text) :], skip_special_tokens=True) for i, output in enumerate(outputs)
         ]
         decoded_outputs_ = [tokenizer.decode(output, skip_special_tokens=True) for i, output in enumerate(outputs)]
 
         # Store the generated text back in the input objects
         for i, item in enumerate(batch):
+            item.input_text = input_text
             item.generated_text = decoded_outputs[i]
             item.generated_all_answer = decoded_outputs_[i]
     return batches
 
 
-def write_result(output_path):
+def write_result(output_path, answer_batches, tokenizer):
     all_result = []
     for batch_num, batch in enumerate(answer_batches):
         for item in batch:
             result = {}
             result["_id"] = item._id
-            result["input_text"] = item.input_text
             if "assistant\n" in item.generated_text:
                 result["generated_text"] = item.generated_text.split("assistant\n")[1]
             elif "assistant" in item.generated_text:
@@ -162,11 +173,11 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--base_model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--train_model_path", type=str, default="model/qwen_lora_1028/checkpoint-4000")
+    parser.add_argument("--train_model_path", type=str, default="qwen_lora_1031_/checkpoint-6000")
     parser.add_argument("--data_file", type=str, default="data/1029data/hotpot_dev.json")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
-    parser.add_argument("--output_dir", type=str, default="result/qwen_lora_1028/hotpot_1000.json")
+    parser.add_argument("--output_dir", type=str, default="result/1031+loss/hotpot_tt.json")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--data_sample", type=bool, default=True)
     parser.add_argument("--mrc_value", type=str, default=True)
@@ -195,4 +206,4 @@ if __name__ == "__main__":
     answer_batches = generate_batch_answer(batches, tokenizer, model)
     #### 답변작성
 
-    write_result(args.output_dir)
+    write_result(args.output_dir, answer_batches, tokenizer)
