@@ -332,17 +332,7 @@ def process_func(example, tokenizer):
     token_doc["input_ids"] += token_end["input_ids"]
     token_doc["attention_mask"] += token_end["attention_mask"]
 
-    if example["question"] == "answer":
-        assert example["mrc_type"] == "T"
-        assert example["sum_type"] == "F"
-        instruction = tokenizer(
-                f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question'].strip()}\n**Document:\n",
-                add_special_tokens=False,
-            )
-        response = tokenizer(
-            f"<|im_start|>assistant\n**Answer:{example['output'].strip()}\n**Summary:\n<|im_end|>\n",
-            add_special_tokens=False,
-        )
+    
     if example["question"] == "summary":
         assert example["mrc_type"] == "F"
         assert example["sum_type"] == "T"
@@ -352,6 +342,17 @@ def process_func(example, tokenizer):
                 )
         response = tokenizer(
             f"<|im_start|>assistant\n**Answer:\n**Summary:{example['output'].strip()}\n<|im_end|>\n",
+            add_special_tokens=False,
+        )
+    else :
+        assert example["mrc_type"] == "T"
+        assert example["sum_type"] == "F"
+        instruction = tokenizer(
+                f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question'].strip()}\n**Document:\n",
+                add_special_tokens=False,
+            )
+        response = tokenizer(
+            f"<|im_start|>assistant\n**Answer:{example['output'].strip()}\n**Summary:\n<|im_end|>\n",
             add_special_tokens=False,
         )
                 
@@ -388,8 +389,8 @@ if __name__ == "__main__":
     parser.add_argument("--max_dec_len", type=int, default=3)
     parser.add_argument("--new_model", type=str, default="new_model")
     parser.add_argument("--wandb_project", type=str, default="llm pointer network")
-    parser.add_argument("--wandb_run_name", type=str, default="1027")
-    parser.add_argument("--output_dir", type=str, default="qwen_lora_1026")
+    parser.add_argument("--wandb_run_name", type=str, default="1101")
+    parser.add_argument("--output_dir", type=str, default="qwen_lora_1101")
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
