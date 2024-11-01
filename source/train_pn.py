@@ -282,42 +282,7 @@ class CustomTrainer(Trainer):
             # We don't use .loss here since the model may return tuples instead of ModelOutput.
             loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0] # path, batch , 1742(max_sent)
 
-            
-        sampled_evidence_scores = outputs.get("attention_scores")  # batch*path, 2, max_sent??
-        mask = outputs.get("mask")  # batch, dec_len, max_sent
-        path_logits = outputs.get("path_logits")  # path, batch, max_len, 151667
-        sampled_evidence_sentence = outputs.get("evidence_sentences")
-        
-        #####################################################################
-        #               형태 바꾸기
-        #####################################################################
-        # r_batch_size = mask.size(0)
-        # sampled_evidence_scores = sampled_evidence_scores.view(r_batch_size, config.beam_size, config.max_dec_len, -1)
-        # #####################################################################
-        # #              먼저 답변 부터 생성
-        # #####################################################################
-        # # path, batch
-        # predicted_answer, evidence_predicted_answer = self.generate_sentences(
-        #     model, inputs, r_batch_size, loss, sampled_evidence_scores, mask, path_logits, sampled_evidence_sentence
-        # )
-
-        # best_path, f1_list, g_f1_list = self.compute_evidence_f1_score(
-        #     predicted_answer, evidence_predicted_answer, inputs, r_batch_size
-        # )
-
-        # evidence_nll, g_evidence_nll = self.compute_evidence_loss(
-        #     r_batch_size, best_path, f1_list, g_f1_list, sampled_evidence_scores, sampled_evidence_sentence, mask
-        # )
-        # column_indices = torch.arange(config.beam_size, device="cuda")
-        # if torch.mean(evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000:
-        #     loss = loss + 0.1 * evidence_nll
-        # if torch.mean(g_evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000:
-        #     loss = loss + 0.1 * g_evidence_nll
-
-        # r_loss = loss[column_indices, best_path].mean()
-
-        # r_loss = loss[0, :].mean().requires_grad_(True)
-        r_loss = loss[0]
+        r_loss = loss[0, :].mean()
         return (r_loss, outputs) if return_outputs else r_loss
 
 
@@ -367,54 +332,29 @@ def process_func(example, tokenizer):
     token_doc["input_ids"] += token_end["input_ids"]
     token_doc["attention_mask"] += token_end["attention_mask"]
 
-    if example["data_type"] == "answer":
-        if example["answer_type"] == "F":
-            if example["question"] == "no":  # 질문이 없는 경우
-                instruction = tokenizer(
-                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n",
-                    add_special_tokens=False,
-                )
-            else:
-                instruction = tokenizer(
-                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question'].strip()}\n**Document:\n",
-                    add_special_tokens=False,
-                )
-            response = tokenizer(
-                f"<|im_start|>assistant\n**Answer:\n**Summary:\n<|im_end|>\n", add_special_tokens=False
-            )
-        else:  # 답 해야하는 경우 질문은 무조건 있음
-            instruction = tokenizer(
+    if example["question"] == "answer":
+        assert example["mrc_type"] == "T"
+        assert example["sum_type"] == "F"
+        instruction = tokenizer(
                 f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question'].strip()}\n**Document:\n",
                 add_special_tokens=False,
             )
-            response = tokenizer(
-                f"<|im_start|>assistant\n**Answer:{example['output'].strip()}\n**Summary:\n<|im_end|>\n",
-                add_special_tokens=False,
-            )
-    elif example["data_type"] == "summary":
-        if example["answer_type"] == "F":  # 무응답의 경우 질문이 무조건 없음
-            instruction = tokenizer(
-                f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n",
-                add_special_tokens=False,
-            )
-            response = tokenizer(
-                f"<|im_start|>assistant\n**Answer:\n**Summary:\n<|im_end|>\n", add_special_tokens=False
-            )
-        else:  # 답 해야하는 경우 질문 유무
-            if example["question"] == "summary":  # 질문이 없는 경우
-                instruction = tokenizer(
-                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n",
-                    add_special_tokens=False,
-                )
-            else:
-                instruction = tokenizer(
+        response = tokenizer(
+            f"<|im_start|>assistant\n**Answer:{example['output'].strip()}\n**Summary:\n<|im_end|>\n",
+            add_special_tokens=False,
+        )
+    if example["question"] == "summary":
+        assert example["mrc_type"] == "F"
+        assert example["sum_type"] == "T"
+        instruction = tokenizer(
                     f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question'].strip()}\n**Document:\n",
                     add_special_tokens=False,
                 )
-            response = tokenizer(
-                f"<|im_start|>assistant\n**Answer:\n**Summary:{example['output'].strip()}\n<|im_end|>\n",
-                add_special_tokens=False,
-            )
+        response = tokenizer(
+            f"<|im_start|>assistant\n**Answer:\n**Summary:{example['output'].strip()}\n<|im_end|>\n",
+            add_special_tokens=False,
+        )
+                
     # instruction에 대한 문장 번호
     sentence_position = [0] * len(instruction["input_ids"]) + sentence_position
     sentence_position.extend([0] * len(response["input_ids"]))
