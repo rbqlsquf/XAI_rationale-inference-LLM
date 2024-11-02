@@ -20,12 +20,13 @@ def create_model(base_model_path, lora_path, config):
 
 
 class InferenceInput:
-    def __init__(self, _id, input_text, answer, attention_mask, sent_masks):
+    def __init__(self, _id, input_text, answer, attention_mask, sent_masks, gold_sp):
         self._id = _id
         self.input_text = input_text
         self.answer = answer
         self.attention_mask = attention_mask
         self.sent_masks = sent_masks
+        self.gold_sp = gold_sp
 
 
 def create_example(all_example, tokenizer, data_sample, mrc_value, sum_value):
@@ -57,24 +58,26 @@ def create_example(all_example, tokenizer, data_sample, mrc_value, sum_value):
                 f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n",
                 add_special_tokens=False,
             )
-            response = tokenizer(
-                f"<|im_start|>assistant\n**Answer:\n**Summary:{example['output'].strip()}\n<|im_end|>\n",
-                add_special_tokens=False,
-            )
+            # response = tokenizer(
+            #     f"<|im_start|>assistant\n**Answer:\n**Summary:{example['output'].strip()}\n<|im_end|>\n",
+            #     add_special_tokens=False,
+            # )
+            response = f"<|im_start|>assistant\n**Answer:\n**Summary:{example['output'].strip()}\n<|im_end|>\n"
         else:  # MRC의 경우
             instruction = tokenizer(
                 f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question'].strip()}\n**Document:\n",
                 add_special_tokens=False,
             )
-            response = tokenizer(
-                f"<|im_start|>assistant\n**Answer:{example['output'].strip()}\n**Summary:\n<|im_end|>\n",
-                add_special_tokens=False,
-            )
-
+            # response = tokenizer(
+            #     f"<|im_start|>assistant\n**Answer:{example['output'].strip()}\n**Summary:\n<|im_end|>\n",
+            #     add_special_tokens=False,
+            # )
+            response = f"<|im_start|>assistant\n**Answer:{example['output'].strip()}\n**Summary:\n<|im_end|>\n"
         sentence_position = [0] * len(instruction["input_ids"]) + sentence_position
         input = instruction["input_ids"] + token_doc["input_ids"]
         attention_mask = instruction["attention_mask"] + token_doc["attention_mask"]
-        output = example["output"]
+        output = response
+        gold_sp = example["supporting_num"]
         assert len(input) == len(sentence_position) == len(attention_mask)
 
         all_result.append(
@@ -84,10 +87,11 @@ def create_example(all_example, tokenizer, data_sample, mrc_value, sum_value):
                 answer=output,
                 attention_mask=attention_mask,
                 sent_masks=sentence_position,
+                gold_sp=gold_sp,
             )
         )
         if data_sample:
-            if len(all_result) == 10:
+            if len(all_result) == 100:
                 break
     return all_result
 
@@ -123,12 +127,11 @@ def generate_batch_answer(batches, tokenizer, model):
                 sent_masks=input_batch["sent_masks"],
                 max_new_tokens=200,
             )
-            sentence_number = model.sentence_number
-            print(sentence_number)
-            exit(1)
 
         input_text = [tokenizer.decode(input_id, skip_special_tokens=True) for i, input_id in enumerate(input_ids)]
-        decoded_outputs = [tokenizer.decode(output[len(input_text):], skip_special_tokens=True) for i, output in enumerate(outputs)]
+        decoded_outputs = [
+            tokenizer.decode(output[len(input_text) :], skip_special_tokens=True) for i, output in enumerate(outputs)
+        ]
         decoded_outputs_ = [tokenizer.decode(output, skip_special_tokens=True) for i, output in enumerate(outputs)]
 
         # Store the generated text back in the input objects
@@ -136,6 +139,7 @@ def generate_batch_answer(batches, tokenizer, model):
             item.input_text = input_text
             item.generated_text = decoded_outputs[i]
             item.generated_all_answer = decoded_outputs_[i]
+            item.pred_sp = model.sentence_number[i]
     return batches
 
 
@@ -153,6 +157,8 @@ def write_result(output_path, answer_batches, tokenizer):
                 result["generated_text"] = item.generated_text
             result["answer"] = item.answer
             result["generated_all_answer"] = item.generated_all_answer
+            result["gold_sp"] = item.gold_sp
+            result["pred_sp"] = item.pred_sp.tolist()
             all_result.append(result)
 
     with open(output_path, "w", encoding="utf-8") as f:
@@ -165,15 +171,15 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--base_model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--train_model_path", type=str, default="/hdd/rbqlsquf/qwen_lora_1031/checkpoint-3000")
-    parser.add_argument("--data_file", type=str, default="data/1029data/cnn_dev.json")
+    parser.add_argument("--train_model_path", type=str, default="model/qwen_lora_1101/checkpoint-9000")
+    parser.add_argument("--data_file", type=str, default="data/1029data/hotpot_dev_supporting.json")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
-    parser.add_argument("--output_dir", type=str, default="result/qwen_lora_1031/hotpot_test.json")
+    parser.add_argument("--output_dir", type=str, default="result/qwen_lora_1101/hotpot_tf.json")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--data_sample", type=bool, default=True)
-    parser.add_argument("--mrc_value", type=str, default=False)
-    parser.add_argument("--sum_value", type=str, default=True)
+    parser.add_argument("--mrc_value", type=str, default=True)
+    parser.add_argument("--sum_value", type=str, default=False)
     args = parser.parse_args()
     print(args)
     #########################################################
