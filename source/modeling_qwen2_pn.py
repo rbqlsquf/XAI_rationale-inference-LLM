@@ -199,7 +199,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         self.gru = BeamSearchAttentionDecoder(config.hidden_size, self.max_sent, self.beam_size)
         self.max_dec_len = config.max_dec_len
         self.hidden_size = config.hidden_size
-
+        self.sentence_number = None
     def save_pn_model(self, model_path):
         torch.save(self.gru.state_dict(), os.path.join(model_path, "model.pt"))
 
@@ -366,7 +366,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             evidence_sentences = torch.tensor(evidence_sentences, dtype=torch.long).cuda()
             self.evidence = evidence_vector
             attention_scores = attention_scores.squeeze(2).transpose(0, 1)
-
+            self.sentence_number = evidence_sentences
         ##############################################################################
         #                   evidence_vector 만들었음                                  #
         ##############################################################################

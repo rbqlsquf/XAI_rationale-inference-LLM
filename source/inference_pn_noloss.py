@@ -116,24 +116,18 @@ def generate_batch_answer(batches, tokenizer, model):
 
         with torch.no_grad():
             model.evidence = None
+            model.sentence_number = None
             outputs = model.generate(
                 input_ids=input_batch["input_ids"],
                 attention_mask=input_batch["attention_mask"],
                 sent_masks=input_batch["sent_masks"],
                 max_new_tokens=200,
             )
+            sentence_number = model.sentence_number
+            print(sentence_number)
+            exit(1)
 
         input_text = [tokenizer.decode(input_id, skip_special_tokens=True) for i, input_id in enumerate(input_ids)]
-        # decoded_outputs = []
-        # for i, output in enumerate(outputs):
-        #     pad_indices = (output == tokenizer.pad_token_id).nonzero(as_tuple=True)[0]
-        #     if pad_indices.numel() > 0:  # If there is at least one pad_token_id
-        #         last_pad_idx = pad_indices[-1].item()
-        #     else:
-        #         last_pad_idx = 0
-            
-            # decoded_outputs.append(tokenizer.decode(output[last_pad_idx+1 + len(input_ids[i]):], skip_special_tokens=True))
-            
         decoded_outputs = [tokenizer.decode(output[len(input_text):], skip_special_tokens=True) for i, output in enumerate(outputs)]
         decoded_outputs_ = [tokenizer.decode(output, skip_special_tokens=True) for i, output in enumerate(outputs)]
 
