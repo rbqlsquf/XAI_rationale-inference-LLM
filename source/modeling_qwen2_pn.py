@@ -200,6 +200,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         self.max_dec_len = config.max_dec_len
         self.hidden_size = config.hidden_size
         self.sentence_number = None
+
     def save_pn_model(self, model_path):
         torch.save(self.gru.state_dict(), os.path.join(model_path, "model.pt"))
 

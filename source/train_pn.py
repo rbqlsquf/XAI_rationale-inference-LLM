@@ -282,7 +282,39 @@ class CustomTrainer(Trainer):
             # We don't use .loss here since the model may return tuples instead of ModelOutput.
             loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]  # path, batch , 1742(max_sent)
 
-        r_loss = loss[0, :].mean()
+        sampled_evidence_scores = outputs.get("attention_scores")  # batch*path, 2, max_sent??
+        mask = outputs.get("mask")  # batch, dec_len, max_sent
+        path_logits = outputs.get("path_logits")  # path, batch, max_len, 151667
+        sampled_evidence_sentence = outputs.get("evidence_sentences")
+
+        #####################################################################
+        #               형태 바꾸기
+        #####################################################################
+        r_batch_size = mask.size(0)
+        sampled_evidence_scores = sampled_evidence_scores.view(r_batch_size, config.beam_size, config.max_dec_len, -1)
+        #####################################################################
+        #              먼저 답변 부터 생성
+        #####################################################################
+        # path, batch
+        predicted_answer, evidence_predicted_answer = self.generate_sentences(
+            model, inputs, r_batch_size, loss, sampled_evidence_scores, mask, path_logits, sampled_evidence_sentence
+        )
+
+        best_path, f1_list, g_f1_list = self.compute_evidence_f1_score(
+            predicted_answer, evidence_predicted_answer, inputs, r_batch_size
+        )
+
+        evidence_nll, g_evidence_nll = self.compute_evidence_loss(
+            r_batch_size, best_path, f1_list, g_f1_list, sampled_evidence_scores, sampled_evidence_sentence, mask
+        )
+        column_indices = torch.arange(r_batch_size, device="cuda")
+        if torch.mean(evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000:
+            loss = loss + 0.1 * evidence_nll
+        if torch.mean(g_evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000:
+            loss = loss + 0.1 * g_evidence_nll
+
+        r_loss = loss[best_path, column_indices].mean()
+
         return (r_loss, outputs) if return_outputs else r_loss
 
 
@@ -354,7 +386,6 @@ def process_func(example, tokenizer):
             f"<|im_start|>assistant\n**Answer:{example['output'].strip()}\n**Summary:\n<|im_end|>\n",
             add_special_tokens=False,
         )
-
     # instruction에 대한 문장 번호
     sentence_position = [0] * len(instruction["input_ids"]) + sentence_position
     sentence_position.extend([0] * len(response["input_ids"]))
@@ -388,8 +419,8 @@ if __name__ == "__main__":
     parser.add_argument("--max_dec_len", type=int, default=3)
     parser.add_argument("--new_model", type=str, default="new_model")
     parser.add_argument("--wandb_project", type=str, default="llm pointer network")
-    parser.add_argument("--wandb_run_name", type=str, default="1101")
-    parser.add_argument("--output_dir", type=str, default="qwen_lora_1101")
+    parser.add_argument("--wandb_run_name", type=str, default="1101+loss")
+    parser.add_argument("--output_dir", type=str, default="qwen_lora_1026")
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
@@ -410,7 +441,7 @@ if __name__ == "__main__":
     print("학습 데이터 : ", data_file)
     dataset = Dataset.from_json(data_file)
     if args.data_sample:
-        dataset = dataset.select(range(12))
+        dataset = dataset.select(range(100))
     processed_dataset = dataset.map(lambda example: process_func(example, tokenizer))
 
     new_model = args.new_model
