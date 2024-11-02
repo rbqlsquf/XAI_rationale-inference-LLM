@@ -143,8 +143,7 @@ def generate_batch_answer(batches, tokenizer, model):
             item.input_text = input_text
             item.generated_text = decoded_outputs[i]
             item.generated_all_answer = decoded_outputs_[i]
-            if model.sentence_number != None:
-                item.pred_sp = model.sentence_number[i]
+            item.pred_sp = model.sentence_number[i]
     return batches
 
 
@@ -178,14 +177,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--base_model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
     parser.add_argument("--train_model_path", type=str, default="model/qwen_lora_1101/checkpoint-9000")
-    parser.add_argument("--data_file", type=str, default="data/1029data/cnn_dev.json")
+    parser.add_argument("--data_file", type=str, default="data/1029data/hotpot_dev_supporting.json")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
-    parser.add_argument("--output_dir", type=str, default="result/qwen_lora_1101/cnn_ft.json")
+    parser.add_argument("--output_dir", type=str, default="result/qwen_lora_1101/hotpot_tf.json")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--data_sample", type=bool, default=True)
-    parser.add_argument("--mrc_value", type=str, default=False)
-    parser.add_argument("--sum_value", type=str, default=True)
+    parser.add_argument("--mrc_value", type=str, default=True)
+    parser.add_argument("--sum_value", type=str, default=False)
     args = parser.parse_args()
     print(args)
     #########################################################
