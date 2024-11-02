@@ -91,7 +91,7 @@ def create_example(all_example, tokenizer, data_sample, mrc_value, sum_value):
             )
         )
         if data_sample:
-            if len(all_result) == 1:
+            if len(all_result) == 100:
                 break
     return all_result
 
@@ -175,7 +175,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_file", type=str, default="data/1029data/hotpot_dev_supporting.json")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
-    parser.add_argument("--output_dir", type=str, default="result/qwen_lora_1031/hotpot_test.json")
+    parser.add_argument("--output_dir", type=str, default="result/qwen_lora_1101/hotpot_tf.json")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--data_sample", type=bool, default=True)
     parser.add_argument("--mrc_value", type=str, default=True)
