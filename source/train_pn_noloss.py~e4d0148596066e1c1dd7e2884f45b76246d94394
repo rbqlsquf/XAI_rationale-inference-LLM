@@ -388,8 +388,8 @@ if __name__ == "__main__":
     parser.add_argument("--max_dec_len", type=int, default=3)
     parser.add_argument("--new_model", type=str, default="new_model")
     parser.add_argument("--wandb_project", type=str, default="llm pointer network")
-    parser.add_argument("--wandb_run_name", type=str, default="1027")
-    parser.add_argument("--output_dir", type=str, default="qwen_lora_1026")
+    parser.add_argument("--wandb_run_name", type=str, default="1101")
+    parser.add_argument("--output_dir", type=str, default="qwen_lora_1101")
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
@@ -410,7 +410,7 @@ if __name__ == "__main__":
     print("학습 데이터 : ", data_file)
     dataset = Dataset.from_json(data_file)
     if args.data_sample:
-        dataset = dataset.select(range(100))
+        dataset = dataset.select(range(12))
     processed_dataset = dataset.map(lambda example: process_func(example, tokenizer))
 
     new_model = args.new_model
@@ -449,7 +449,7 @@ if __name__ == "__main__":
         logging_steps=1,
         lr_scheduler_type="cosine",
         gradient_checkpointing=True,
-        save_steps=200,
+        save_steps=1000,
         save_on_each_node=True,
         do_train=True,
         push_to_hub=False,
