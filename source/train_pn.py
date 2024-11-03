@@ -314,6 +314,8 @@ class CustomTrainer(Trainer):
             loss = loss + 0.1 * g_evidence_nll
 
         r_loss = loss[best_path, column_indices].mean()
+        print("r_loss : {}, evidence_nll : {}, g_evidence_nll : {}".format(r_loss, evidence_nll, g_evidence_nll))
+        #current_step = self.state.global_step
 
         return (r_loss, outputs) if return_outputs else r_loss
 
