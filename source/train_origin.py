@@ -116,28 +116,82 @@ def process_func(example, tokenizer):
     token_doc["input_ids"] += token_end["input_ids"]
     token_doc["attention_mask"] += token_end["attention_mask"]
 
-    if example["question"] == "summary":
-        assert example["mrc_type"] == "F"
-        assert example["sum_type"] == "T"
-        instruction = tokenizer(
-            f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question'].strip()}\n**Document:\n",
-            add_special_tokens=False,
-        )
-        response = tokenizer(
-            f"<|im_start|>assistant\n**Answer:\n**Summary:{example['output'].strip()}\n<|im_end|>\n",
-            add_special_tokens=False,
-        )
-    else:
-        assert example["mrc_type"] == "T"
-        assert example["sum_type"] == "F"
-        instruction = tokenizer(
-            f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question'].strip()}\n**Document:\n",
-            add_special_tokens=False,
-        )
-        response = tokenizer(
-            f"<|im_start|>assistant\n**Answer:{example['output'].strip()}\n**Summary:\n<|im_end|>\n",
-            add_special_tokens=False,
-        )
+    ########################################################################################################################
+    #           전처리 형태 바꾸기
+    ########################################################################################################################
+    if example["data_type"] == "answer":
+        if example["answer_type"] == "F":
+            if example["question"] == "no":  # 질문이 없는 경우
+                instruction = tokenizer(
+                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n",
+                    add_special_tokens=False,
+                )
+            else:
+                instruction = tokenizer(
+                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n",
+                    add_special_tokens=False,
+                )
+            response = tokenizer(
+                f"<|im_start|>assistant\n**Answer:\n**Summary:\n<|im_end|>\n", add_special_tokens=False
+            )
+        else:  # 답 해야하는 경우 질문은 무조건 있음
+            instruction = tokenizer(
+                f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n",
+                add_special_tokens=False,
+            )
+            response = tokenizer(
+                f"<|im_start|>assistant\n**Answer:{example['output'].strip()}\n**Summary:\n<|im_end|>\n",
+                add_special_tokens=False,
+            )
+    elif example["data_type"] == "summary":
+        if example["answer_type"] == "F":  # 무응답의 경우 질문이 무조건 없음
+            instruction = tokenizer(
+                f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n",
+                add_special_tokens=False,
+            )
+            response = tokenizer(
+                f"<|im_start|>assistant\n**Answer:\n**Summary:\n<|im_end|>\n", add_special_tokens=False
+            )
+        else:  # 답 해야하는 경우 질문 유무
+            if example["question"] == "summary":  # 질문이 없는 경우
+                instruction = tokenizer(
+                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n{example['document']}<|im_end|>\n",
+                    add_special_tokens=False,
+                )
+            else:
+                instruction = tokenizer(
+                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n{example['document']}<|im_end|>\n",
+                    add_special_tokens=False,
+                )
+            response = tokenizer(
+                f"<|im_start|>assistant\n**Answer:\n**Summary:{example['output'].strip()}\n<|im_end|>\n",
+                add_special_tokens=False,
+            )
+    ####################################################################################################
+    #           데이터 형태 바꾸기
+    ####################################################################################################
+    # if example["question"] == "summary":
+    #     assert example["mrc_type"] == "F"
+    #     assert example["sum_type"] == "T"
+    #     instruction = tokenizer(
+    #         f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question'].strip()}\n**Document:\n",
+    #         add_special_tokens=False,
+    #     )
+    #     response = tokenizer(
+    #         f"<|im_start|>assistant\n**Answer:\n**Summary:{example['output'].strip()}\n<|im_end|>\n",
+    #         add_special_tokens=False,
+    #     )
+    # else:
+    #     assert example["mrc_type"] == "T"
+    #     assert example["sum_type"] == "F"
+    #     instruction = tokenizer(
+    #         f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question'].strip()}\n**Document:\n",
+    #         add_special_tokens=False,
+    #     )
+    #     response = tokenizer(
+    #         f"<|im_start|>assistant\n**Answer:{example['output'].strip()}\n**Summary:\n<|im_end|>\n",
+    #         add_special_tokens=False,
+    #     )
 
     # instruction에 대한 문장 번호
     sentence_position = [0] * len(instruction["input_ids"]) + sentence_position
@@ -159,7 +213,6 @@ def process_func(example, tokenizer):
         "sent_masks": sentence_position,
     }
 
-
 if __name__ == "__main__":
 
     ##############################################################
@@ -167,7 +220,7 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--data_file", type=str, default="data/1022data/hotpot_cnn_6k.json")
+    parser.add_argument("--data_file", type=str, default="data/train_hotpot_cnn_1022.json")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
     parser.add_argument("--new_model", type=str, default="hotpot_cnn_origin")

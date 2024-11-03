@@ -314,8 +314,11 @@ class CustomTrainer(Trainer):
             loss = loss + 0.1 * g_evidence_nll
 
         r_loss = loss[best_path, column_indices].mean()
+        print("========================================")
+        print(self.state.global_step)
+        print("loss:{}".format(loss))
+        print("best_path : {}".format(best_path))
         print("r_loss : {}, evidence_nll : {}, g_evidence_nll : {}".format(r_loss, evidence_nll, g_evidence_nll))
-        #current_step = self.state.global_step
 
         return (r_loss, outputs) if return_outputs else r_loss
 
@@ -471,15 +474,15 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--data_file", type=str, default="data/1022data/hotpot_cnn_6k.json")
+    parser.add_argument("--data_file", type=str, default="data/train_hotpot_cnn_1022.json")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
     parser.add_argument("--new_model", type=str, default="new_model")
     parser.add_argument("--wandb_project", type=str, default="llm pointer network")
-    parser.add_argument("--wandb_run_name", type=str, default="1101+loss")
+    parser.add_argument("--wandb_run_name", type=str, default="1103+loss")
     parser.add_argument("--output_dir", type=str, default="qwen_lora_1026")
     parser.add_argument("--num_train_epochs", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--data_sample", type=bool, default=False)
     args = parser.parse_args()
