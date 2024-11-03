@@ -283,6 +283,10 @@ class CustomTrainer(Trainer):
             loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]  # path, batch , 1742(max_sent)
 
         r_loss = loss[0, :].mean()
+        print("========================================")
+        print(self.state.global_step)
+        print("loss:{}".format(loss))
+        
         return (r_loss, outputs) if return_outputs else r_loss
 
 
@@ -331,7 +335,7 @@ def process_func(example, tokenizer):
     sentence_position.extend([0] * len(token_end))
     token_doc["input_ids"] += token_end["input_ids"]
     token_doc["attention_mask"] += token_end["attention_mask"]
-    
+
     ########################################################################################################################
     #           전처리 형태 바꾸기
     ########################################################################################################################
