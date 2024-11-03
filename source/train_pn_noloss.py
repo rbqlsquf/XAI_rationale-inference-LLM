@@ -331,7 +331,7 @@ def process_func(example, tokenizer):
     sentence_position.extend([0] * len(token_end))
     token_doc["input_ids"] += token_end["input_ids"]
     token_doc["attention_mask"] += token_end["attention_mask"]
-    
+
     ########################################################################################################################
     #           전처리 형태 바꾸기
     ########################################################################################################################
