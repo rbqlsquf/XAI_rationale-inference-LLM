@@ -374,6 +374,15 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         # element 합으로 수정
         all_path_logits = []
         for path in range(self.beam_size):
+            # hidden_states : (batch, max_length, hidden)
+            # self.evidence : (batch, 1, hidden)
+            
+            # weight = nn.Sigmoid(hidden_states.bmm(self.evidence.transpose(1, 2)) / d_k) : (batch, max_length, 1)
+            # weighted_evidence = weight * self.evidence : (batch, max_length, hidden)
+            # last_hidden = self.w1(torch.cat([hidden_states, weighted_evidence], -1))
+            #                   : (batch, max_length, hidden*2) -> (batch, max_length, hidden)
+            # logits = self.lm_head(last_hidden)
+            
             tmp_hidden_states = hidden_states + self.evidence[:, path, :].unsqueeze(1)
             all_path_logits.append(self.lm_head(tmp_hidden_states).float())
 

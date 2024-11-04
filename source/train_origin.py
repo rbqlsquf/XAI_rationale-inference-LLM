@@ -17,6 +17,7 @@ import wandb
 from torch.nn import functional as F
 import argparse
 
+
 class CustomDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
     def __call__(self, features):
         # sentence_masks를 제외한 features 리스트 생성
@@ -33,6 +34,7 @@ class CustomDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
             batch["sent_masks"] = torch.tensor(padded_sentence_masks)
 
         return batch
+
 
 class CustomTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False):
@@ -67,10 +69,11 @@ class CustomTrainer(Trainer):
                 )
             # We don't use .loss here since the model may return tuples instead of ModelOutput.
             loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]  # path, batch , 1742(max_sent)
-
+        print(r_loss)
         r_loss = loss
         return (r_loss, outputs) if return_outputs else r_loss
-    
+
+
 def create_model(model_path, config):
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     model = Qwen2ForCausalLM.from_pretrained(model_path, config=config, device_map="cuda")
@@ -78,6 +81,7 @@ def create_model(model_path, config):
     model.config.use_cache = False
     tokenizer.padding_side = "left"
     return tokenizer, model
+
 
 IGNORE_INDEX = -100
 
@@ -212,6 +216,7 @@ def process_func(example, tokenizer):
         "labels": labels,
         "sent_masks": sentence_position,
     }
+
 
 if __name__ == "__main__":
 

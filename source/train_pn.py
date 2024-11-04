@@ -308,9 +308,9 @@ class CustomTrainer(Trainer):
             r_batch_size, best_path, f1_list, g_f1_list, sampled_evidence_scores, sampled_evidence_sentence, mask
         )
         column_indices = torch.arange(r_batch_size, device="cuda")
-        if torch.mean(evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000:
+        if torch.mean(evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000 and torch.isnan(torch.mean(evidence_nll).item()):
             loss = loss + 0.1 * evidence_nll
-        if torch.mean(g_evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000:
+        if torch.mean(g_evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000 and torch.isnan(torch.mean(evidence_nll).item()):
             loss = loss + 0.1 * g_evidence_nll
 
         r_loss = loss[best_path, column_indices].mean()

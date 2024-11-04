@@ -143,7 +143,8 @@ def generate_batch_answer(batches, tokenizer, model):
             item.input_text = input_text
             item.generated_text = decoded_outputs[i]
             item.generated_all_answer = decoded_outputs_[i]
-            item.pred_sp = model.sentence_number[i]
+            if model.sentence_number != None:
+                item.pred_sp = model.sentence_number[i]
     return batches
 
 
@@ -180,11 +181,11 @@ if __name__ == "__main__":
     parser.add_argument("--data_file", type=str, default="data/1029data/hotpot_dev_supporting.json")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
-    parser.add_argument("--output_dir", type=str, default="result/qwen_lora_1101/hotpot_tf.json")
+    parser.add_argument("--output_dir", type=str, default="result/qwen_lora_1101/hotpot_tt.json")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--data_sample", type=bool, default=True)
     parser.add_argument("--mrc_value", type=str, default=True)
-    parser.add_argument("--sum_value", type=str, default=False)
+    parser.add_argument("--sum_value", type=str, default=True)
     args = parser.parse_args()
     print(args)
     #########################################################
