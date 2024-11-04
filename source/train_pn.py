@@ -527,7 +527,7 @@ if __name__ == "__main__":
 
     model.print_trainable_parameters()
     for name, param in model.named_parameters():
-        if "gru" in name:
+        if "gru" in name or "linear_w1" in name:
             param.requires_grad = True
         print(f"Parameter: {name}, requires_grad: {param.requires_grad}")
 
