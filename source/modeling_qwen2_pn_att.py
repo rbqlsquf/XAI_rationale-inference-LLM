@@ -27,7 +27,6 @@ from dataclasses import dataclass
 from torch.nn import functional as F
 import os
 
-
 class BeamSearchAttentionDecoder(nn.Module):
     def __init__(self, hidden_size, num_sent, topk=1):
         super(BeamSearchAttentionDecoder, self).__init__()
@@ -380,7 +379,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
 
             #: (batch, max_length, 1)
             d_k = hidden_states.size(2)
-            weight = F.sigmoid(hidden_states.bmm(self.evidence.transpose(1, 2)) / d_k)
+            weight = F.sigmoid(hidden_states.bmm(self.evidence.transpose(1, 2)) / math.sqrt(d_k))
             # : (batch, max_length, hidden)
             weighted_evidence = weight * self.evidence
             tmp_hidden_states = self.linear_w1(torch.cat([hidden_states, weighted_evidence], -1))
