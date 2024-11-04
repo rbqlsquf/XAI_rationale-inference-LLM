@@ -308,14 +308,24 @@ class CustomTrainer(Trainer):
             r_batch_size, best_path, f1_list, g_f1_list, sampled_evidence_scores, sampled_evidence_sentence, mask
         )
         column_indices = torch.arange(r_batch_size, device="cuda")
-        if torch.mean(evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000:
+        if (
+            torch.mean(evidence_nll).item() != 0
+            and torch.mean(evidence_nll).item() < 1000
+            and torch.isnan(torch.mean(evidence_nll).item())
+        ):
             loss = loss + 0.1 * evidence_nll
-        if torch.mean(g_evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000:
+        if (
+            torch.mean(g_evidence_nll).item() != 0
+            and torch.mean(evidence_nll).item() < 1000
+            and torch.isnan(torch.mean(evidence_nll).item())
+        ):
             loss = loss + 0.1 * g_evidence_nll
 
         r_loss = loss[best_path, column_indices].mean()
         print("========================================")
         print(self.state.global_step)
+        print("loss:{}".format(loss))
+        print("best_path : {}".format(best_path))
         print("r_loss : {}, evidence_nll : {}, g_evidence_nll : {}".format(r_loss, evidence_nll, g_evidence_nll))
 
         return (r_loss, outputs) if return_outputs else r_loss
@@ -482,7 +492,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--data_sample", type=bool, default=True)
+    parser.add_argument("--data_sample", type=bool, default=False)
     args = parser.parse_args()
     print(args)
     #########################################################

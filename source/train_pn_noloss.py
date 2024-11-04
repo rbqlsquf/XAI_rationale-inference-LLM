@@ -283,6 +283,10 @@ class CustomTrainer(Trainer):
             loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]  # path, batch , 1742(max_sent)
 
         r_loss = loss[0, :].mean()
+        print("========================================")
+        print(self.state.global_step)
+        print("loss:{}".format(loss))
+
         return (r_loss, outputs) if return_outputs else r_loss
 
 
