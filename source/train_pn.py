@@ -1,3 +1,4 @@
+
 import os
 import torch
 from datasets import Dataset
@@ -13,11 +14,7 @@ from transformers import (
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 from peft import LoraConfig, get_peft_model
 import wandb
-<<<<<<< HEAD
-from modeling_qwen2_pn import Qwen2ForCausalLM_pn
-=======
 from modeling_qwen2_pn_att import Qwen2ForCausalLM_pn
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
 from nltk.translate.bleu_score import sentence_bleu
 from torch.nn import functional as F
 import argparse
@@ -73,21 +70,6 @@ class CustomTrainer(Trainer):
             sample_inputs = []
             real_input_len = []
             for k in range(r_batch_size):
-<<<<<<< HEAD
-                # 첫 번째 1의 인덱스 찾기
-                #############################################################
-                #                   sentence_group에 대한 내용
-                #############################################################
-                sentence_groups = {}
-                for idx, sentence_num in enumerate(inputs["sent_masks"][k]):
-                    if str(sentence_num) not in sentence_groups:
-                        sentence_groups[str(sentence_num)] = []
-                    sentence_groups[str(sentence_num)].append(idx)
-
-                first_one_index = (inputs["sent_masks"][k] == 1).nonzero(as_tuple=True)[0][0].item()
-                tmp_sentence_mask = [0] * len(inputs["sent_masks"][k][:first_one_index])
-                see_tokens = list(range(0, len(inputs["sent_masks"][k][:first_one_index])))
-=======
                 target_value = tokenizer.encode("<|im_start|>")[0]
                 target_value_2 = tokenizer.encode("<|im_end|>")[0]
                 im_start_index = (inputs["input_ids"][k] == target_value).nonzero(as_tuple=True)[0][0].item()
@@ -100,40 +82,10 @@ class CustomTrainer(Trainer):
                 ################################################################
                 #       see_tokens는 근거 문장 자체로 정의
                 ################################################################
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
                 for j in range(config.max_dec_len):
                     see_tokens.extend(
                         (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
                     )
-<<<<<<< HEAD
-
-                    tmp_sentence_mask = tmp_sentence_mask + [j + 1] * len(
-                        (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
-                    )
-                sentences = inputs["input_ids"][k][see_tokens]
-                tmp_input_ids = sentences.tolist()
-                ignore_padding_index = (inputs["labels"][k] == -100).nonzero(as_tuple=True)[0]
-                tmp_labels = [IGNORE_INDEX] * (len(tmp_input_ids) + 2)  # 엔터랑 eos까지 더해주기
-                real_input_len.append(len(tmp_input_ids) + 2)
-                if ignore_padding_index.numel() > 0:
-                    tmp_input_ids = (
-                        tmp_input_ids
-                        + [tokenizer.eos_token_id]
-                        + tokenizer.encode("\n")
-                        + inputs["labels"][k][ignore_padding_index[-1] + 1 :].tolist()
-                    )
-                    tmp_labels = tmp_labels + inputs["labels"][k][ignore_padding_index[-1] + 1 :].tolist()
-                else:
-                    tmp_input_ids = (
-                        tmp_input_ids
-                        + [tokenizer.eos_token_id]
-                        + tokenizer.encode("\n")
-                        + inputs["labels"][k].tolist()
-                    )
-                    tmp_labels = tmp_labels + inputs["labels"][k].tolist()
-                tmp_sentence_mask.extend([0] * (len(tmp_input_ids) - len(tmp_sentence_mask)))
-                tokens = tokenizer.decode(tmp_input_ids)
-=======
                     tmp_sentence_mask = tmp_sentence_mask + [j + 1] * len(
                         (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
                     )
@@ -153,7 +105,6 @@ class CustomTrainer(Trainer):
                     tmp_labels = tmp_labels + inputs["labels"][k].tolist()
                     tmp_sentence_mask.extend([0] * len(inputs["labels"][k].tolist()))
                 # tokens = tokenizer.decode(tmp_input_ids)
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
                 tmp_attention_mask = torch.ones(len(tmp_input_ids), dtype=torch.long).tolist()
                 assert len(tmp_input_ids) == len(tmp_attention_mask) == len(tmp_sentence_mask) == len(tmp_labels)
                 # 데이터 추가하는 방법
@@ -302,11 +253,6 @@ class CustomTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False):
         # input을 원하는 대로 수정
         model.model.evidence = None
-<<<<<<< HEAD
-        # 모델에 수정된 inputs 전달
-        outputs = model(**inputs)
-        loss = outputs.get("loss")  # path, batch , 1742(max_sent)
-=======
 
         if self.label_smoother is not None and "labels" in inputs:
             labels = inputs.pop("labels")
@@ -337,15 +283,11 @@ class CustomTrainer(Trainer):
             # We don't use .loss here since the model may return tuples instead of ModelOutput.
             loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]  # path, batch , 1742(max_sent)
 
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
         sampled_evidence_scores = outputs.get("attention_scores")  # batch*path, 2, max_sent??
         mask = outputs.get("mask")  # batch, dec_len, max_sent
         path_logits = outputs.get("path_logits")  # path, batch, max_len, 151667
         sampled_evidence_sentence = outputs.get("evidence_sentences")
-<<<<<<< HEAD
-=======
 
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
         #####################################################################
         #               형태 바꾸기
         #####################################################################
@@ -366,16 +308,6 @@ class CustomTrainer(Trainer):
         evidence_nll, g_evidence_nll = self.compute_evidence_loss(
             r_batch_size, best_path, f1_list, g_f1_list, sampled_evidence_scores, sampled_evidence_sentence, mask
         )
-<<<<<<< HEAD
-        column_indices = torch.arange(config.beam_size, device="cuda")
-        if torch.mean(evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000:
-            loss = loss + 0.1 * evidence_nll
-        if torch.mean(g_evidence_nll).item() != 0 and torch.mean(evidence_nll).item() < 1000:
-            loss = loss + 0.1 * g_evidence_nll
-
-        r_loss = loss[column_indices, best_path].mean()
-        r_loss = r_loss.clone().detach().requires_grad_(True)
-=======
         column_indices = torch.arange(r_batch_size, device="cuda")
         if (
             torch.mean(evidence_nll).item() != 0
@@ -397,7 +329,6 @@ class CustomTrainer(Trainer):
         print("best_path : {}".format(best_path))
         print("r_loss : {}, evidence_nll : {}, g_evidence_nll : {}".format(r_loss, evidence_nll, g_evidence_nll))
 
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
         return (r_loss, outputs) if return_outputs else r_loss
 
 
@@ -443,12 +374,6 @@ def process_func(example, tokenizer):
         token_doc["input_ids"] += token_sent["input_ids"]
         token_doc["attention_mask"] += token_sent["attention_mask"]
     token_end = tokenizer("<|im_end|>\n", add_special_tokens=False)
-<<<<<<< HEAD
-    sentence_position.extend([sentence_number] * len(token_end))
-    token_doc["input_ids"] += token_end["input_ids"]
-    token_doc["attention_mask"] += token_end["attention_mask"]
-
-=======
     sentence_position.extend([0] * len(token_end))
     token_doc["input_ids"] += token_end["input_ids"]
     token_doc["attention_mask"] += token_end["attention_mask"]
@@ -456,7 +381,6 @@ def process_func(example, tokenizer):
     ########################################################################################################################
     #           전처리 형태 바꾸기
     ########################################################################################################################
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
     if example["data_type"] == "answer":
         if example["answer_type"] == "F":
             if example["question"] == "no":  # 질문이 없는 경우
@@ -466,11 +390,7 @@ def process_func(example, tokenizer):
                 )
             else:
                 instruction = tokenizer(
-<<<<<<< HEAD
-                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question'].strip()}\n**Document:\n",
-=======
                     f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n",
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
                     add_special_tokens=False,
                 )
             response = tokenizer(
@@ -478,11 +398,7 @@ def process_func(example, tokenizer):
             )
         else:  # 답 해야하는 경우 질문은 무조건 있음
             instruction = tokenizer(
-<<<<<<< HEAD
-                f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question'].strip()}\n**Document:\n",
-=======
                 f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n",
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
                 add_special_tokens=False,
             )
             response = tokenizer(
@@ -501,28 +417,18 @@ def process_func(example, tokenizer):
         else:  # 답 해야하는 경우 질문 유무
             if example["question"] == "summary":  # 질문이 없는 경우
                 instruction = tokenizer(
-<<<<<<< HEAD
-                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n",
-=======
                     f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n{example['document']}<|im_end|>\n",
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
                     add_special_tokens=False,
                 )
             else:
                 instruction = tokenizer(
-<<<<<<< HEAD
-                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question'].strip()}\n**Document:\n",
-=======
                     f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n{example['document']}<|im_end|>\n",
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
                     add_special_tokens=False,
                 )
             response = tokenizer(
                 f"<|im_start|>assistant\n**Answer:\n**Summary:{example['output'].strip()}\n<|im_end|>\n",
                 add_special_tokens=False,
             )
-<<<<<<< HEAD
-=======
     ####################################################################################################
     #           데이터 형태 바꾸기
     ####################################################################################################
@@ -549,7 +455,6 @@ def process_func(example, tokenizer):
     #         add_special_tokens=False,
     #     )
 
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
     # instruction에 대한 문장 번호
     sentence_position = [0] * len(instruction["input_ids"]) + sentence_position
     sentence_position.extend([0] * len(response["input_ids"]))
@@ -578,30 +483,17 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-<<<<<<< HEAD
-    parser.add_argument("--data_file", type=str, default="data/hotpot_cnn_6k.json")
-=======
     parser.add_argument("--data_file", type=str, default="data/1020data/train_hotpot_cnn_filtered.json")
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
     parser.add_argument("--new_model", type=str, default="new_model")
     parser.add_argument("--wandb_project", type=str, default="llm pointer network")
-<<<<<<< HEAD
-    parser.add_argument("--wandb_run_name", type=str, default="1027")
-    parser.add_argument("--output_dir", type=str, default="qwen_lora_1026")
-    parser.add_argument("--num_train_epochs", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--data_sample", type=bool, default=True)
-=======
     parser.add_argument("--wandb_run_name", type=str, default="1103+loss")
     parser.add_argument("--output_dir", type=str, default="qwen_lora_1026")
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--data_sample", type=bool, default=False)
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
     args = parser.parse_args()
     print(args)
     #########################################################
@@ -618,11 +510,7 @@ if __name__ == "__main__":
     print("학습 데이터 : ", data_file)
     dataset = Dataset.from_json(data_file)
     if args.data_sample:
-<<<<<<< HEAD
-        dataset = dataset.select(range(12))
-=======
         dataset = dataset.select(range(100))
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
     processed_dataset = dataset.map(lambda example: process_func(example, tokenizer))
 
     new_model = args.new_model
@@ -640,11 +528,8 @@ if __name__ == "__main__":
 
     model.print_trainable_parameters()
     for name, param in model.named_parameters():
-<<<<<<< HEAD
-=======
         if "gru" in name or "linear_w1" in name:
             param.requires_grad = True
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
         print(f"Parameter: {name}, requires_grad: {param.requires_grad}")
 
     ##############################################################
@@ -661,17 +546,10 @@ if __name__ == "__main__":
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         warmup_ratio=0.1,
         learning_rate=1e-4,
-<<<<<<< HEAD
-        logging_steps=10,
-        lr_scheduler_type="cosine",
-        gradient_checkpointing=True,
-        save_steps=1000,
-=======
         logging_steps=1,
         lr_scheduler_type="cosine",
         gradient_checkpointing=True,
         save_steps=200,
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
         save_on_each_node=True,
         do_train=True,
         push_to_hub=False,
