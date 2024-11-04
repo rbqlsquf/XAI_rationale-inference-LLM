@@ -14,7 +14,7 @@ from transformers import (
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 from peft import LoraConfig, get_peft_model
 import wandb
-from modeling_qwen2_pn_att import Qwen2ForCausalLM_pn
+from modeling_qwen2_pn_att import Qwen2ForCausalLM_pn, BeamSearchAttentionDecoder
 from nltk.translate.bleu_score import sentence_bleu
 from torch.nn import functional as F
 import argparse
@@ -336,6 +336,8 @@ def create_model(model_path, config):
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     model = Qwen2ForCausalLM_pn.from_pretrained(model_path, config=config, device_map="cuda")
     model.enable_input_require_grads()
+    gru = BeamSearchAttentionDecoder(hidden_size=config.hidden_size, num_sent=config.max_dec_len, topk=config.beam_size)
+    model.set_gru(gru)
     model.config.use_cache = False
     tokenizer.padding_side = "left"
     return tokenizer, model
@@ -493,7 +495,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--data_sample", type=bool, default=True)
+    parser.add_argument("--data_sample", type=bool, default=False)
     args = parser.parse_args()
     print(args)
     #########################################################
