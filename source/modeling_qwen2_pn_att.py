@@ -26,6 +26,7 @@ from transformers import AutoTokenizer
 from dataclasses import dataclass
 from torch.nn import functional as F
 import os
+import torch.nn.init as init
 
 class BeamSearchAttentionDecoder(nn.Module):
     def __init__(self, hidden_size, num_sent, topk=1):
@@ -36,11 +37,15 @@ class BeamSearchAttentionDecoder(nn.Module):
         self.dense2 = nn.Linear(in_features=hidden_size, out_features=hidden_size)
         self.dense3 = nn.Linear(in_features=hidden_size * 2, out_features=hidden_size)
 
-        self.decoder = nn.GRU(input_size=hidden_size, hidden_size=hidden_size, batch_first=True, num_layers=1)
+        self.decoder = nn.GRU(input_size=hidden_size, hidden_size=hidden_size, batch_first=True, num_layers=1, bias=False)
 
         self.div_term = math.sqrt(hidden_size)
         self.topk = topk
-
+    
+    def init_weights(self):
+        for name, param in self.decoder.named_parameters():
+            if 'weight_ih' in name or 'weight_hh' in name:
+                init.xavier_uniform_(param)  # Orthogonal 초기화 적용
     def forward(
         self,
         last_hidden,
@@ -62,7 +67,9 @@ class BeamSearchAttentionDecoder(nn.Module):
         max_sent = encoder_outputs.size(1)
         indexes = [e for e in range(batch_size)]
         key_encoder_outputs = self.dense1(encoder_outputs)
+        key_encoder_outputs = key_encoder_outputs + encoder_outputs
         value_encoder_outputs = self.dense2(encoder_outputs)
+        value_encoder_outputs = value_encoder_outputs + encoder_outputs
 
         # key : (batch, seq, hidden)
         # value : (batch, seq, hidden)
@@ -195,11 +202,14 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         self.max_sent = 60
         self.evidence = None
         self.beam_size = config.beam_size
+        self.linear_w1 = nn.Linear(in_features=config.hidden_size * 2, out_features=config.hidden_size)
         self.gru = BeamSearchAttentionDecoder(config.hidden_size, self.max_sent, self.beam_size)
+        self.gru.init_weights()
         self.max_dec_len = config.max_dec_len
         self.hidden_size = config.hidden_size
+        
         self.sentence_number = None
-        self.linear_w1 = nn.Linear(in_features=config.hidden_size * 2, out_features=config.hidden_size)
+        
 
     def save_pn_model(self, model_path):
         torch.save(self.gru.state_dict(), os.path.join(model_path, "model.pt"))

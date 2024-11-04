@@ -6,55 +6,7 @@ import json
 from peft import PeftModel, PeftConfig
 from datasets import Dataset
 
-<<<<<<< HEAD
-from modeling_qwen2_pn import Qwen2ForCausalLM
-import argparse
-
-
-def create_model(base_model_path, lora_path,config):
-    tokenizer = AutoTokenizer.from_pretrained(base_model_path)
-    new_special_tokens = {"additional_special_tokens": ["<|mrc|>", "<|summary|>"]}
-    tokenizer.add_special_tokens(new_special_tokens)
-    tokenizer.padding_side = "left"
-    # config.vocab_size = config.vocab_size + len(new_special_tokens)
-    # AutoModelForCausalLM -> Qwen2ForCausalLM
-    peft_model = Qwen2ForCausalLM.from_pretrained(lora_path, device_map="auto")
-    return tokenizer, peft_model
-
-
-class InferenceInput:
-    def __init__(self, _id, input_text, answer):
-        self._id = _id
-        self.input_text = input_text
-        self.answer = answer
-
-
-def create_example(all_example, tokenizer):
-    all_result = []
-    task_instruction = "Only fill in the **Answer to the **Question based on the **Document if <|MRC|> is True. Do not fill in the **Answer if the Question is not provided or if <|MRC|> is False. Only fill in the **Summary with a summary of the **Document if <|SUM|> is True. Do not fill in the **Summary if <|SUM|> is False."
-    for example in tqdm(all_example):
-        if example["question"] == "summary":
-            messages = [
-                {"role": "system", "content": f"{task_instruction}\n<|MRC|>True<|SUM|>True"},
-                {"role": "user", "content": f"**Document:\n{example['document']}"},
-            ]
-        else:  # MRC의 경우
-            messages = [
-                {
-                    "role": "system",
-                    "content": f"{task_instruction}\n<|MRC|>True<|SUM|>False",
-                },
-                {"role": "user", "content": f"**Question:{example['question']}\n**Document:\n{example['document']}"},
-            ]
-
-        result = {}
-        result["input"] = tokenizer.apply_chat_template(messages, tokenize=False)
-        result["output"] = example["output"]
-        all_result.append(InferenceInput(_id=example["_id"], input_text=result["input"], answer=result["output"]))
-        # if len(all_result) == 100:
-        #     break
-=======
-from modeling_qwen2_pn import Qwen2ForCausalLM_pn
+from modeling_qwen2_pn_att import Qwen2ForCausalLM_pn
 import argparse
 
 
@@ -145,7 +97,6 @@ def create_example(all_example, tokenizer, data_sample, mrc_value, sum_value):
         if data_sample:
             if len(all_result) == 100:
                 break
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
     return all_result
 
 
@@ -157,25 +108,6 @@ def create_batches(input_list, batch_size):
 
 def generate_batch_answer(batches, tokenizer, model):
     for batch_num, batch in enumerate(tqdm(batches)):
-<<<<<<< HEAD
-        batch_texts = [item.input_text for item in batch]
-        inputs = tokenizer(
-            batch_texts,  # Tokenized texts after applying chat template
-            return_tensors="pt",  # Return in tensor format
-            padding=True,  # Pad sequences to the same length
-        ).to("cuda")
-        model.to("cuda")
-        with torch.no_grad():
-            model.model.evidence = None
-            outputs = model.generate(
-                **inputs,
-                sentence_masks=0,  # 여기다가 넣으셈
-                max_new_tokens=512,
-            )
-
-        decoded_outputs = [
-            tokenizer.decode(output[len(inputs[i]) :], skip_special_tokens=True) for i, output in enumerate(outputs)
-=======
         input_ids = [item.input_text for item in batch]
         attention_mask = [item.attention_mask for item in batch]
         sentence_masks = [item.sent_masks for item in batch]
@@ -203,20 +135,11 @@ def generate_batch_answer(batches, tokenizer, model):
         input_text = [tokenizer.decode(input_id, skip_special_tokens=True) for i, input_id in enumerate(input_ids)]
         decoded_outputs = [
             tokenizer.decode(output[len(input_text) :], skip_special_tokens=True) for i, output in enumerate(outputs)
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
         ]
         decoded_outputs_ = [tokenizer.decode(output, skip_special_tokens=True) for i, output in enumerate(outputs)]
 
         # Store the generated text back in the input objects
         for i, item in enumerate(batch):
-<<<<<<< HEAD
-            item.generated_text = decoded_outputs[i]
-            item.generated_all_answer = decoded_outputs_[i]
-    return batches
-
-
-def write_result(output_path):
-=======
             item.input_text = input_text
             item.generated_text = decoded_outputs[i]
             item.generated_all_answer = decoded_outputs_[i]
@@ -226,32 +149,22 @@ def write_result(output_path):
 
 
 def write_result(output_path, answer_batches, tokenizer):
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
     all_result = []
     for batch_num, batch in enumerate(answer_batches):
         for item in batch:
             result = {}
             result["_id"] = item._id
-<<<<<<< HEAD
-            result["input_text"] = item.input_text
-            if "assistant" in item.generated_text:
-                result["generated_text"] = item.generated_text.split("assistant\n")[1]
-=======
             if "assistant\n" in item.generated_text:
                 result["generated_text"] = item.generated_text.split("assistant\n")[1]
             elif "assistant" in item.generated_text:
                 result["generated_text"] = item.generated_text.split("assistant")[1]
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
             else:
                 result["generated_text"] = item.generated_text
             result["answer"] = item.answer
             result["generated_all_answer"] = item.generated_all_answer
-<<<<<<< HEAD
-=======
             if item.gold_sp != None:
                 result["gold_sp"] = item.gold_sp
                 result["pred_sp"] = item.pred_sp.tolist()
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
             all_result.append(result)
 
     with open(output_path, "w", encoding="utf-8") as f:
@@ -259,42 +172,12 @@ def write_result(output_path, answer_batches, tokenizer):
 
 
 if __name__ == "__main__":
-<<<<<<< HEAD
-    # parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
-    # parser.add_argument("--model_path", type=str, required=True, help="모델 경로")
-    # parser.add_argument("--output_path", type=str, required=True, help="결과저장 경로")
-    # args = parser.parse_args()
-
-    # model_path = args.model_path
-    # output_path = args.output_path
-
-    model_path = "/hdd/rbqlsquf/qwen_lora_1026/checkpoint-60"
-    output_path = "result/mean/hotpot_1000.json"
-    ##########################################
-
-    base_model_path = "Qwen/Qwen2.5-3B-Instruct"
-    config = AutoConfig.from_pretrained(base_model_path)
-    
-    tokenizer, model = create_model(base_model_path, model_path, config)
-
-    file_path = "data/1008data/hotpot_dev.json"
-    batch_size = 16
-    print(batch_size)
-
-    with open(file_path, "r", encoding="utf-8") as file:
-        dev_data = json.load(file)
-
-    input_data = create_example(dev_data, tokenizer)
-
-    # Create batches of input items
-    batches = list(create_batches(input_data, batch_size))
-=======
     ##############################################################
     #               model param 추가할 내용
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--base_model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--train_model_path", type=str, default="model/qwen_lora_1101/checkpoint-9000")
+    parser.add_argument("--train_model_path", type=str, default="model/1102+dataup/checkpoint-7000")
     parser.add_argument("--data_file", type=str, default="data/1029data/hotpot_dev_supporting.json")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
@@ -323,13 +206,8 @@ if __name__ == "__main__":
 
     # Create batches of input items
     batches = list(create_batches(input_data, args.batch_size))
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
 
     answer_batches = generate_batch_answer(batches, tokenizer, model)
     #### 답변작성
 
-<<<<<<< HEAD
-    write_result(output_path)
-=======
     write_result(args.output_dir, answer_batches, tokenizer)
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f

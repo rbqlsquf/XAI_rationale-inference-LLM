@@ -493,7 +493,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--data_sample", type=bool, default=False)
+    parser.add_argument("--data_sample", type=bool, default=True)
     args = parser.parse_args()
     print(args)
     #########################################################
