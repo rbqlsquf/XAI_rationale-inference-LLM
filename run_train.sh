@@ -6,7 +6,7 @@ OUTPUT_DIR="$BASE_DIR/result"
 SOURCE_DIR="$BASE_DIR/source"
 
 
-$PYTHON_PATH $SOURCE_DIR/train_pn_noloss.py \
+$PYTHON_PATH $SOURCE_DIR/train_pn.py \
     --data_file "$BASE_DIR/data/1020data/train_hotpot_cnn_filtered.json" \
     --new_model "1104+dataup+loss+att" \
     --output_dir "1104+dataup+loss+att" \
