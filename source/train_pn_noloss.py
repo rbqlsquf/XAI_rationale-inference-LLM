@@ -5,28 +5,16 @@ from datasets import Dataset
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
-<<<<<<< HEAD
-=======
     AutoConfig,
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
     DataCollatorForSeq2Seq,
     TrainingArguments,
     Trainer,
-    Qwen2ForCausalLM,
 )
-
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 from peft import LoraConfig, get_peft_model
 import wandb
-<<<<<<< HEAD
-
-
-def create_model(model_path):
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
-    model = Qwen2ForCausalLM.from_pretrained(model_path, device_map="cuda")
-    new_special_tokens = {"additional_special_tokens": ["<|mrc|>", "<|summary|>"]}
-    tokenizer.add_special_tokens(new_special_tokens)
-    model.resize_token_embeddings(len(tokenizer))
-=======
+from modeling_qwen2_pn import Qwen2ForCausalLM_pn
+from nltk.translate.bleu_score import sentence_bleu
 from torch.nn import functional as F
 import argparse
 
@@ -50,6 +38,217 @@ class CustomDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
 
 
 class CustomTrainer(Trainer):
+
+    def save_model(self, output_dir: Optional[str] = None, _internal_call: bool = False):
+        super().save_model(output_dir, _internal_call)
+        self.model.model.save_pn_model(output_dir)
+
+    def generate_sentences(
+        self, model, inputs, r_batch_size, loss, sampled_evidence_scores, mask, logits, sampled_evidence_sentence
+    ):
+        # [batch, beam_size, max_dec, -1]
+        predicted_answer = []
+        evidence_predicted_answer = []
+        for path in range(config.beam_size):
+            logit = torch.argmax(logits[path], dim=-1)
+
+            decoded_outputs = [
+                tokenizer.decode(output[inputs["labels"][i] != -100], skip_special_tokens=True)
+                for i, output in enumerate(logit)
+            ]
+            predicted_answer.append(decoded_outputs)
+            #####################################################
+            #           근거 문장 생성
+            #####################################################
+            evidence_path = (
+                sampled_evidence_sentence.view(r_batch_size, -1, config.max_dec_len).transpose(0, 1)[path].tolist()
+            )
+            #####################################################
+            #           근거 문장에 따른 입력 재구성
+            #####################################################
+            sample_inputs = []
+            real_input_len = []
+            for k in range(r_batch_size):
+                target_value = tokenizer.encode("<|im_start|>")[0]
+                target_value_2 = tokenizer.encode("<|im_end|>")[0]
+                im_start_index = (inputs["input_ids"][k] == target_value).nonzero(as_tuple=True)[0][0].item()
+                im_end_index = (inputs["input_ids"][k] == target_value_2).nonzero(as_tuple=True)[0][0].item()
+                sentences = inputs["input_ids"][k][im_start_index : im_end_index + 1]
+                sentences = sentences.tolist() + tokenizer.encode("\n<|im_start|>user\n**Document:\n")
+                tmp_sentence_mask = [0] * len(sentences)
+
+                see_tokens = []
+                ################################################################
+                #       see_tokens는 근거 문장 자체로 정의
+                ################################################################
+                for j in range(config.max_dec_len):
+                    see_tokens.extend(
+                        (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
+                    )
+                    tmp_sentence_mask = tmp_sentence_mask + [j + 1] * len(
+                        (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
+                    )
+                tmp_input_ids = (
+                    sentences + inputs["input_ids"][k][see_tokens].tolist() + tokenizer.encode("<|im_end|>\n")
+                )
+                tmp_sentence_mask = tmp_sentence_mask + [0] * 2
+                ignore_padding_index = (inputs["labels"][k] == -100).nonzero(as_tuple=True)[0]
+                tmp_labels = [IGNORE_INDEX] * (len(tmp_input_ids))  # 엔터랑 eos까지 더해주기
+                real_input_len.append(len(tmp_input_ids))
+                if ignore_padding_index.numel() > 0:
+                    tmp_input_ids = tmp_input_ids + inputs["labels"][k][ignore_padding_index[-1] + 1 :].tolist()
+                    tmp_labels = tmp_labels + inputs["labels"][k][ignore_padding_index[-1] + 1 :].tolist()
+                    tmp_sentence_mask.extend([0] * len(inputs["labels"][k][ignore_padding_index[-1] + 1 :].tolist()))
+                else:
+                    tmp_input_ids = tmp_input_ids + inputs["labels"][k].tolist()
+                    tmp_labels = tmp_labels + inputs["labels"][k].tolist()
+                    tmp_sentence_mask.extend([0] * len(inputs["labels"][k].tolist()))
+                # tokens = tokenizer.decode(tmp_input_ids)
+                tmp_attention_mask = torch.ones(len(tmp_input_ids), dtype=torch.long).tolist()
+                assert len(tmp_input_ids) == len(tmp_attention_mask) == len(tmp_sentence_mask) == len(tmp_labels)
+                # 데이터 추가하는 방법
+
+                sample_input = {
+                    "input_ids": tmp_input_ids,
+                    "attention_mask": tmp_attention_mask,
+                    "sent_masks": tmp_sentence_mask,
+                    "labels": tmp_labels,
+                }
+                sample_inputs.append(sample_input)
+            ###############################################
+            input_ids = [f.get("input_ids", None) for f in sample_inputs]
+            attention_mask = [f.get("attention_mask", None) for f in sample_inputs]
+            sentence_masks = [f.get("sent_masks", None) for f in sample_inputs]
+            labels = [f.get("labels", None) for f in sample_inputs]
+
+            max_length = max(len(mask) for mask in input_ids)
+            batch = {}
+
+            padded_input_ids = [[tokenizer.pad_token_id] * (max_length - len(mask)) + mask for mask in input_ids]
+            batch["input_ids"] = torch.tensor(padded_input_ids).cuda()
+            padded_attention_mask = [[0] * (max_length - len(mask)) + mask for mask in attention_mask]
+            batch["attention_mask"] = torch.tensor(padded_attention_mask).cuda()
+            padded_sentence_masks = [[0] * (max_length - len(mask)) + mask for mask in sentence_masks]
+            batch["sent_masks"] = torch.tensor(padded_sentence_masks).cuda()
+            padded_labels = [[IGNORE_INDEX] * (max_length - len(mask)) + mask for mask in labels]
+            batch["labels"] = torch.tensor(padded_labels).cuda()
+            ####################################################################
+            model.model.evidence = None
+            e_outputs = model(
+                input_ids=batch["input_ids"],
+                attention_mask=batch["attention_mask"],
+                sent_masks=batch["sent_masks"],
+                labels=batch["labels"],
+            )
+            e_logits = e_outputs.get("logits")  # path, batch , 1742(max_sent)
+            argmax_e_logits = torch.argmax(e_logits, dim=-1)
+
+            e_decoded_outputs = [
+                tokenizer.decode(output[real_input_len[i] :], skip_special_tokens=True)
+                for i, output in enumerate(argmax_e_logits)
+            ]
+
+            #####################################################
+            #           근거 문장만 입력으로 했을 때 출력 친구들 넣어주기
+            #####################################################
+            evidence_predicted_answer.append(e_decoded_outputs)
+        #########################################
+        #       beam size에 대해서 predict_answer, evidence_predicted_answer 완료
+        #########################################
+        return predicted_answer, evidence_predicted_answer
+
+    def compute_evidence_f1_score(self, predicted_answer, evidence_predicted_answer, inputs, r_batch_size):
+        # [path, batch]
+        f1_list = [[1e-3 for _ in range(r_batch_size)] for _ in range(config.beam_size)]
+        g_f1_list = [[1e-3 for _ in range(r_batch_size)] for _ in range(config.beam_size)]
+        filtered_labels = [labels[labels != -100].tolist() for labels in inputs["labels"]]
+        gold_list = tokenizer.batch_decode(filtered_labels, skip_special_tokens=True)
+        for path in range(config.beam_size):
+            predicted = predicted_answer[path]
+            e_predicted = evidence_predicted_answer[path]
+            # batch 단위로 나옴
+            for batch_id, (pred_, e_pred_) in enumerate(zip(predicted, e_predicted)):
+                e_pred = e_pred_.replace("assistant\n**Answer:", "").replace("\n**Summary:", "").split(" ")
+                pred = pred_.replace("assistant\n**Answer:", "").replace("\n**Summary:", "").split(" ")
+                gold = gold_list[batch_id].replace("assistant\n**Answer:", "").replace("\n**Summary:", "").split()
+                f1 = sentence_bleu([pred], e_pred, weights=(1.0, 0, 0, 0))
+                g_f1 = sentence_bleu([gold], e_pred, weights=(1.0, 0, 0, 0))
+                f1_list[path][batch_id] += f1
+                g_f1_list[path][batch_id] += g_f1
+        f1_list = torch.tensor(f1_list, dtype=torch.float).cuda()
+        g_f1_list = torch.tensor(g_f1_list, dtype=torch.float).cuda()
+
+        # 가장 성능이 높은 Path 선정
+        ll = f1_list + g_f1_list
+        best_path = torch.argmax(ll, 0)
+        return best_path, f1_list, g_f1_list
+
+    def compute_evidence_loss(
+        self, r_batch_size, best_path, f1_list, g_f1_list, sampled_evidence_scores, sampled_evidence_sentence, mask
+    ):
+        s_sampled_evidence_sentence = torch.zeros(
+            [config.beam_size, r_batch_size, config.max_dec_len, sampled_evidence_scores.size(-1)],
+            dtype=torch.long,
+        ).cuda()
+        g_sampled_evidence_sentence = torch.zeros(
+            [config.beam_size, r_batch_size, config.max_dec_len, sampled_evidence_scores.size(-1)],
+            dtype=torch.long,
+        ).cuda()
+        r_sampled_evidence_sentence = sampled_evidence_sentence.view(-1, config.beam_size, config.max_dec_len)
+
+        for idx in range(config.beam_size):
+            sampled_sampled_evidence_sentence = F.one_hot(
+                r_sampled_evidence_sentence[:, idx, :], num_classes=sampled_evidence_scores.size(-1)
+            )
+            negative_sampled_evidence_sentence = torch.sum(sampled_sampled_evidence_sentence, 1, keepdim=True)
+            f1 = f1_list[idx]
+            g_f1 = g_f1_list[idx]
+
+            ##################################################################
+            # batch단위로 진행해야함
+            ##################################################################
+            # Evidence Vector based Answer <=> Evidence Sentence based Answer
+            #                  Gold Answer <=> Evidence Sentence based Answer
+
+            # 점수가 낮은 경우 추론된 Evidence Sentence를 제외한 모든 문장의 확률을 높이도록
+            for batch_idx in range(r_batch_size):
+                if f1[batch_idx].item() < 0.5:
+                    s_sampled_evidence_sentence[idx, batch_idx, :, :] = (
+                        mask[batch_idx, :, :] - negative_sampled_evidence_sentence[batch_idx]
+                    )
+                    f1_list[idx][batch_idx] = 1 - f1[batch_idx]
+                # 점수가 높을 경우 추론된 Evidence Sentence 확률을 높이도록
+                else:
+                    s_sampled_evidence_sentence[idx, batch_idx, :, :] = sampled_sampled_evidence_sentence[
+                        batch_idx, :, :
+                    ]
+                if g_f1[batch_idx].item() < 0.5:
+                    g_sampled_evidence_sentence[idx, batch_idx, :, :] = (
+                        mask[batch_idx, :, :] - negative_sampled_evidence_sentence[batch_idx]
+                    )
+                    g_f1_list[idx][batch_idx] = 1 - g_f1[batch_idx]
+                else:
+                    g_sampled_evidence_sentence[idx, batch_idx, :, :] = sampled_sampled_evidence_sentence[
+                        batch_idx, :, :
+                    ]
+
+        e_div = torch.sum(s_sampled_evidence_sentence, -1)
+        g_div = torch.sum(g_sampled_evidence_sentence, -1)
+
+        evidence_nll = -F.log_softmax(sampled_evidence_scores, -1).transpose(0, 1)
+        g_evidence_nll = -F.log_softmax(sampled_evidence_scores, -1).transpose(0, 1)
+
+        evidence_nll = evidence_nll * s_sampled_evidence_sentence
+        g_evidence_nll = g_evidence_nll * g_sampled_evidence_sentence
+
+        evidence_nll = torch.mean(torch.sum(evidence_nll, -1) / e_div, -1)
+        evidence_nll = evidence_nll * f1_list
+
+        g_evidence_nll = torch.mean(torch.sum(g_evidence_nll, -1) / g_div, -1)
+        g_evidence_nll = g_evidence_nll * g_f1_list
+
+        return evidence_nll, g_evidence_nll
+
     def compute_loss(self, model, inputs, return_outputs=False):
         # input을 원하는 대로 수정
         model.model.evidence = None
@@ -83,14 +282,17 @@ class CustomTrainer(Trainer):
             # We don't use .loss here since the model may return tuples instead of ModelOutput.
             loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]  # path, batch , 1742(max_sent)
 
-        r_loss = loss
+        r_loss = loss[0, :].mean()
+        print("========================================")
+        print(self.state.global_step)
+        print("loss:{}".format(loss))
+
         return (r_loss, outputs) if return_outputs else r_loss
 
 
 def create_model(model_path, config):
     tokenizer = AutoTokenizer.from_pretrained(model_path)
-    model = Qwen2ForCausalLM.from_pretrained(model_path, config=config, device_map="cuda")
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
+    model = Qwen2ForCausalLM_pn.from_pretrained(model_path, config=config, device_map="cuda")
     model.enable_input_require_grads()
     model.config.use_cache = False
     tokenizer.padding_side = "left"
@@ -114,11 +316,6 @@ def process_func(example, tokenizer):
     else:
         sum_value = "False"
 
-<<<<<<< HEAD
-    example["document"] = example["document"].strip()
-    ##############다시
-    task_instruction = "Only fill in the **Answer to the **Question based on the **Document if <|MRC|> is True. Do not fill in the **Answer if the Question is not provided or if <|MRC|> is False. Only fill in the **Summary with a summary of the **Document if <|SUM|> is True. Do not fill in the **Summary if <|SUM|> is False."
-=======
     task_instruction = "Only fill in the **Answer to the **Question based on the **Document if <|MRC|> is True. Do not fill in the **Answer if the Question is not provided or if <|MRC|> is False. Only fill in the **Summary with a summary of the **Document if <|SUM|> is True. Do not fill in the **Summary if <|SUM|> is False."
     example["document"] = example["document"].strip()
     # token 된 doc
@@ -142,25 +339,16 @@ def process_func(example, tokenizer):
     ########################################################################################################################
     #           전처리 형태 바꾸기
     ########################################################################################################################
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
     if example["data_type"] == "answer":
         if example["answer_type"] == "F":
             if example["question"] == "no":  # 질문이 없는 경우
                 instruction = tokenizer(
-<<<<<<< HEAD
-                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n{example['document']}<|im_end|>\n",
-=======
                     f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n",
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
                     add_special_tokens=False,
                 )
             else:
                 instruction = tokenizer(
-<<<<<<< HEAD
-                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n{example['document']}<|im_end|>\n",
-=======
                     f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n",
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
                     add_special_tokens=False,
                 )
             response = tokenizer(
@@ -168,29 +356,17 @@ def process_func(example, tokenizer):
             )
         else:  # 답 해야하는 경우 질문은 무조건 있음
             instruction = tokenizer(
-<<<<<<< HEAD
-                f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n{example['document']}<|im_end|>\n",
-                add_special_tokens=False,
-            )
-            response = tokenizer(
-                f"<|im_start|>assistant\n**Answer:{example['output']}\n**Summary:\n<|im_end|>\n",
-=======
                 f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n",
                 add_special_tokens=False,
             )
             response = tokenizer(
                 f"<|im_start|>assistant\n**Answer:{example['output'].strip()}\n**Summary:\n<|im_end|>\n",
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
                 add_special_tokens=False,
             )
     elif example["data_type"] == "summary":
         if example["answer_type"] == "F":  # 무응답의 경우 질문이 무조건 없음
             instruction = tokenizer(
-<<<<<<< HEAD
-                f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n{example['document']}<|im_end|>\n",
-=======
                 f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n",
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
                 add_special_tokens=False,
             )
             response = tokenizer(
@@ -208,20 +384,6 @@ def process_func(example, tokenizer):
                     add_special_tokens=False,
                 )
             response = tokenizer(
-<<<<<<< HEAD
-                f"<|im_start|>assistant\n**Answer:\n**Summary:{example['output']}\n<|im_end|>\n",
-                add_special_tokens=False,
-            )
-
-    input_ids = instruction["input_ids"] + response["input_ids"]
-    attention_mask = instruction["attention_mask"] + response["attention_mask"]
-    labels = [IGNORE_INDEX] * len(instruction["input_ids"]) + response["input_ids"]
-    if len(input_ids) > MAX_LENGTH:
-        input_ids = input_ids[:MAX_LENGTH]
-        attention_mask = attention_mask[:MAX_LENGTH]
-        labels = labels[:MAX_LENGTH]
-    return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
-=======
                 f"<|im_start|>assistant\n**Answer:\n**Summary:{example['output'].strip()}\n<|im_end|>\n",
                 add_special_tokens=False,
             )
@@ -270,34 +432,22 @@ def process_func(example, tokenizer):
         "labels": labels,
         "sent_masks": sentence_position,
     }
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
 
 
 if __name__ == "__main__":
 
-<<<<<<< HEAD
-    model_path = "Qwen/Qwen2.5-3B-Instruct"
-    tokenizer, model = create_model(model_path)
-    data_file = "data/train_hotpot_cnn_1022.json"
-
-    dataset = Dataset.from_json(data_file)
-
-    processed_dataset = dataset.map(lambda example: process_func(example, tokenizer))
-
-    new_model = "qwen_hotpot"
-=======
     ##############################################################
     #               model param 추가할 내용
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--data_file", type=str, default="data/train_hotpot_cnn_1022.json")
+    parser.add_argument("--data_file", type=str, default="data/1022data/hotpot_cnn_6k.json")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
-    parser.add_argument("--new_model", type=str, default="hotpot_cnn_origin")
+    parser.add_argument("--new_model", type=str, default="new_model")
     parser.add_argument("--wandb_project", type=str, default="llm pointer network")
-    parser.add_argument("--wandb_run_name", type=str, default="hotpot_cnn_origin")
-    parser.add_argument("--output_dir", type=str, default="/hdd/rbqlsquf/hotpot_cnn_origin")
+    parser.add_argument("--wandb_run_name", type=str, default="1101+dataup")
+    parser.add_argument("--output_dir", type=str, default="qwen_lora_1101+dataup")
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
@@ -322,7 +472,6 @@ if __name__ == "__main__":
     processed_dataset = dataset.map(lambda example: process_func(example, tokenizer))
 
     new_model = args.new_model
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     peft_config = LoraConfig(
         target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
@@ -336,23 +485,10 @@ if __name__ == "__main__":
     model = get_peft_model(model, peft_config)
 
     model.print_trainable_parameters()
-<<<<<<< HEAD
-    wandb.init(project="qwen llm lora")
-    wandb.run.name = "hotpot_cnn"
-
-    training_params = TrainingArguments(
-        output_dir="/hdd/rbqlsquf/hotpot_cnn",
-        num_train_epochs=1,
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=2,
-        warmup_ratio=0.1,
-        learning_rate=1e-4,
-        logging_steps=10,
-        run_name="qwen lora",
-        lr_scheduler_type="cosine",
-        gradient_checkpointing=True,
-        save_steps=1000,
-=======
+    for name, param in model.named_parameters():
+        if "gru" in name:
+            param.requires_grad = True
+        print(f"Parameter: {name}, requires_grad: {param.requires_grad}")
 
     ##############################################################
     #               wanb
@@ -372,25 +508,16 @@ if __name__ == "__main__":
         lr_scheduler_type="cosine",
         gradient_checkpointing=True,
         save_steps=200,
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
         save_on_each_node=True,
         do_train=True,
         push_to_hub=False,
         report_to="wandb",
     )
-<<<<<<< HEAD
-    trainer = Trainer(
-        model=model,
-        args=training_params,
-        train_dataset=processed_dataset,
-        data_collator=DataCollatorForSeq2Seq(tokenizer=tokenizer, padding=True),
-=======
     trainer = CustomTrainer(
         model=model,
         args=training_params,
         train_dataset=processed_dataset,
         data_collator=CustomDataCollatorForSeq2Seq(tokenizer=tokenizer, padding=True),
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
     )
     trainer.train()
     trainer.save_model(new_model)
