@@ -24,7 +24,7 @@ from transformers.modeling_outputs import (
 from transformers.models.qwen2.configuration_qwen2 import Qwen2Config
 from transformers import AutoTokenizer
 from dataclasses import dataclass
-
+from torch.nn import functional as F
 import os
 
 
@@ -380,7 +380,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
 
             #: (batch, max_length, 1)
             d_k = hidden_states.size(2)
-            weight = nn.Sigmoid(hidden_states.bmm(self.evidence.transpose(1, 2)) / d_k)
+            weight = F.sigmoid(hidden_states.bmm(self.evidence.transpose(1, 2)) / d_k)
             # : (batch, max_length, hidden)
             weighted_evidence = weight * self.evidence
             tmp_hidden_states = self.linear_w1(torch.cat([hidden_states, weighted_evidence], -1))
