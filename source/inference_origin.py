@@ -96,6 +96,7 @@ def create_batches(input_list, batch_size):
     for i in range(0, len(input_list), batch_size):
         yield input_list[i : i + batch_size]
 
+
 def generate_batch_answer(batches, tokenizer, model):
     for batch_num, batch in enumerate(tqdm(batches)):
         input_ids = [item.input_text for item in batch]
@@ -121,17 +122,10 @@ def generate_batch_answer(batches, tokenizer, model):
             )
 
         input_text = [tokenizer.decode(input_id, skip_special_tokens=True) for i, input_id in enumerate(input_ids)]
-        # decoded_outputs = []
-        # for i, output in enumerate(outputs):
-        #     pad_indices = (output == tokenizer.pad_token_id).nonzero(as_tuple=True)[0]
-        #     if pad_indices.numel() > 0:  # If there is at least one pad_token_id
-        #         last_pad_idx = pad_indices[-1].item()
-        #     else:
-        #         last_pad_idx = 0
-            
-            # decoded_outputs.append(tokenizer.decode(output[last_pad_idx+1 + len(input_ids[i]):], skip_special_tokens=True))
-            
-        decoded_outputs = [tokenizer.decode(output[len(input_text):], skip_special_tokens=True) for i, output in enumerate(outputs)]
+
+        decoded_outputs = [
+            tokenizer.decode(output[len(input_text) :], skip_special_tokens=True) for i, output in enumerate(outputs)
+        ]
         decoded_outputs_ = [tokenizer.decode(output, skip_special_tokens=True) for i, output in enumerate(outputs)]
 
         # Store the generated text back in the input objects
@@ -148,7 +142,7 @@ def write_result(output_path, answer_batches, tokenizer):
         for item in batch:
             result = {}
             result["_id"] = item._id
-            result["input_text"]=item.input_text
+            result["input_text"] = item.input_text
             if "assistant\n" in item.generated_text:
                 result["generated_text"] = item.generated_text.split("assistant\n")[1]
             elif "assistant" in item.generated_text:
