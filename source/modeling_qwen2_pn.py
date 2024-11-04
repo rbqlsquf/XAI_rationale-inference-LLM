@@ -383,7 +383,8 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             #                   : (batch, max_length, hidden*2) -> (batch, max_length, hidden)
             # logits = self.lm_head(last_hidden)
             
-            tmp_hidden_states = hidden_states + self.evidence[:, path, :].unsqueeze(1)
+            # tmp_hidden_states = hidden_states + self.evidence[:, path, :].unsqueeze(1)
+            tmp_hidden_states = hidden_states
             all_path_logits.append(self.lm_head(tmp_hidden_states).float())
 
         loss = None
