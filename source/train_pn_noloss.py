@@ -14,7 +14,7 @@ from transformers import (
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 from peft import LoraConfig, get_peft_model
 import wandb
-from modeling_qwen2_pn_att import Qwen2ForCausalLM_pn
+from modeling_qwen2_pn_att import Qwen2ForCausalLM_pn, BeamSearchAttentionDecoder
 from nltk.translate.bleu_score import sentence_bleu
 from torch.nn import functional as F
 import argparse
@@ -88,6 +88,8 @@ def create_model(model_path, config):
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     model = Qwen2ForCausalLM_pn.from_pretrained(model_path, config=config, device_map="cuda")
     model.enable_input_require_grads()
+    gru = BeamSearchAttentionDecoder(hidden_size=config.hidden_size, num_sent=config.max_dec_len, topk=config.beam_size)
+    model.set_gru(gru)
     model.config.use_cache = False
     tokenizer.padding_side = "left"
     return tokenizer, model
@@ -181,31 +183,6 @@ def process_func(example, tokenizer):
                 f"<|im_start|>assistant\n**Answer:\n**Summary:{example['output'].strip()}\n<|im_end|>\n",
                 add_special_tokens=False,
             )
-    ####################################################################################################
-    #           데이터 형태 바꾸기
-    ####################################################################################################
-    # if example["question"] == "summary":
-    #     assert example["mrc_type"] == "F"
-    #     assert example["sum_type"] == "T"
-    #     instruction = tokenizer(
-    #         f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question'].strip()}\n**Document:\n",
-    #         add_special_tokens=False,
-    #     )
-    #     response = tokenizer(
-    #         f"<|im_start|>assistant\n**Answer:\n**Summary:{example['output'].strip()}\n<|im_end|>\n",
-    #         add_special_tokens=False,
-    #     )
-    # else:
-    #     assert example["mrc_type"] == "T"
-    #     assert example["sum_type"] == "F"
-    #     instruction = tokenizer(
-    #         f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question'].strip()}\n**Document:\n",
-    #         add_special_tokens=False,
-    #     )
-    #     response = tokenizer(
-    #         f"<|im_start|>assistant\n**Answer:{example['output'].strip()}\n**Summary:\n<|im_end|>\n",
-    #         add_special_tokens=False,
-    #     )
 
     # instruction에 대한 문장 번호
     sentence_position = [0] * len(instruction["input_ids"]) + sentence_position

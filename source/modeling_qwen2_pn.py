@@ -24,7 +24,7 @@ from transformers.modeling_outputs import (
 from transformers.models.qwen2.configuration_qwen2 import Qwen2Config
 from transformers import AutoTokenizer
 from dataclasses import dataclass
-
+from torch.nn import functional as F
 import os
 
 
@@ -194,34 +194,31 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         # 추가 레이어와 속성
         self.dropout = nn.Dropout(0.1)
         self.max_sent = 60
-<<<<<<< HEAD
-        self.test = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
-=======
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
         self.evidence = None
         self.beam_size = config.beam_size
-        self.gru = BeamSearchAttentionDecoder(config.hidden_size, self.max_sent, self.beam_size)
+        self.linear_w1 = nn.Linear(in_features=config.hidden_size * 2, out_features=config.hidden_size)
+        self.gru = None
+        self.decoder = nn.GRU(input_size=config.hidden_size, hidden_size=config.hidden_size, num_layers=1, bias=False)
         self.max_dec_len = config.max_dec_len
         self.hidden_size = config.hidden_size
-<<<<<<< HEAD
-=======
+        
         self.sentence_number = None
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
-
+        
+    def set_gru(self, gru):
+        self.gru = gru
+        
     def save_pn_model(self, model_path):
-        torch.save(self.gru.state_dict(), os.path.join(model_path, "model.pt"))
+        state_dict = {
+            'gru': self.gru.state_dict(),
+            'linear_w1': self.linear_w1.state_dict()
+        } 
+        torch.save(state_dict, os.path.join(model_path, "model.pt"))
 
     def load_pn_model(self, model_path):
-        self.gru.load_state_dict(torch.load(os.path.join(model_path, "model.pt")))
-
-    # def generate(self, input_ids, **kwargs):
-    #     # 새로운 인자 처리 예시
-    #     sent_masks = kwargs.get("sent_masks", None)  # 추가 인자 예시
-    #     # 필요한 로직을 여기에 추가
-    #     # 예를 들어, new_arg를 사용할 수 있도록 모델 forward 함수에 추가
-    #     outputs = super().generate(input_ids, **kwargs)
-    #     return outputs
-
+        state_dict = torch.load(os.path.join(model_path, "model.pt"))
+        self.gru.load_state_dict(state_dict['gru'])
+        self.linear_w1.load_state_dict(state_dict['linear_w1'])
+    
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -266,29 +263,15 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         mm = None
         attention_scores = None
         batch_size = input_ids.size(0)
-<<<<<<< HEAD
-        Flag = False
-=======
         Flag = False  # 학습하는 과정에서 loss 출력할지 말지를 고민(학습단에서 model에 2번 진입하기 때문)
 
         ##############################################################################
         #                           입력부에 대한 pointer network 계산
         ##############################################################################
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
         if self.evidence is None:
             Flag = True
             # positions [batch, 3] -> 첫번째는 system, user, assistant
             # 위에 내용에 대해서는 target_value 즉, assistant 시작하는 부분을 찾기 위한 함수였음
-<<<<<<< HEAD
-            
-            # [batch, max_sent, max_length]
-            sentence_masks = F.one_hot(sent_masks).transpose(1, 2).float()
-            max_sent = sentence_masks.size(1)
-            # div_term : [batch, max_sent, 1]
-            div_term = torch.sum(sentence_masks, dim=-1, keepdim=True)
-            div_term = div_term.masked_fill(div_term == 0, 1e-10)
-
-=======
 
             # sentence_masks : [batch, max_sent, max_length]
             sentence_masks = F.one_hot(sent_masks).transpose(1, 2).float()
@@ -297,17 +280,12 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             div_term = torch.sum(sentence_masks, dim=-1, keepdim=True)
             div_term = div_term.masked_fill(div_term == 0, 1e-10)
             # sentence_representation : [batch, max_sent, max_length] * [batch, max_length, hidden]  -> [batch, max_sent, hidden]
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
             sentence_representation = sentence_masks.bmm(hidden_states)
             sentence_representation = sentence_representation / div_term
 
             # sentence_representation : [batch, max_sent, hidden]
             sentence_representation = self.dropout(sentence_representation)
-<<<<<<< HEAD
-            # 문장들이 없는 곳에 1을 넣는거임... 왜? 무시할 곳에 1을 넣음 -> 나중에 디코딩단계에서 확률을 낮춰주기 위함
-=======
             # 문장 없는 곳에 1, 있는 곳에 0
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
             sent_attention_masks = (
                 div_term.masked_fill(div_term != 1e-10, 0).masked_fill(div_term == 1e-10, 1).squeeze(dim=2).bool()
             )
@@ -322,11 +300,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             mm = 1 - sent_attention_masks
             mm = mm.unsqueeze(1).expand(-1, self.max_dec_len, -1)
             # 이제 진짜 필요없는 부분에 대해서 엄청 큰 음수값을 넣어줌
-<<<<<<< HEAD
-            # sent_attention_masks : [batch, 1, max_sent]
-=======
             # sent_attention_masks : [batch, 1, max_sent] -> 확률값을 조정하기 위함으로 필요없는 문장들이 pointer nework에서 나오지 않게 하기 위함
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
             sent_attention_masks = (
                 sent_attention_masks.masked_fill(sent_attention_masks == 1, -1e10)
                 .masked_fill(sent_attention_masks == 0, 0)
@@ -338,11 +312,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             encoder_outputs = sentence_representation
 
             ################################################################################
-<<<<<<< HEAD
-            # im_start 위치를 찾고 decoding 하는 단계
-=======
             #               im_start 위치를 찾고 decoding 하는 단계
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
             ################################################################################
             target_value = tokenizer.encode("<|im_start|>")[0]
             mask = torch.eq(input_ids, target_value)
@@ -356,35 +326,19 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             decoder_inputs = []
             for i in range(batch_size):
                 if positions[i][2] == 0:  # first inference
-<<<<<<< HEAD
-                    values = hidden_states[i][positions[i][1] :]
-                    decoder_inputs.append(hidden_states[i][-1, :])
-                else:  # train
-                    values = hidden_states[i][positions[i][1] : positions[i][2]]
-
-                    # 전체 입력에서 마지막에 해당하는 벡터 값을 가지고 오기 위함...
-                    decoder_inputs.append(hidden_states[i][positions[i][2] - 1, :])
-
-            # decoder_inputs : [batch, hidden]
-=======
                     decoder_inputs.append(hidden_states[i][-1, :])
                 else:  # train
                     # 전체 입력에서 마지막에 해당하는 벡터 값을 가지고 오기 위함
                     decoder_inputs.append(hidden_states[i][positions[i][2] - 1, :])
 
             # decoder_inputs : [batch, hidden] -> [batch, 1, hidden]
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
             decoder_inputs = torch.stack(decoder_inputs, 0)
             decoder_inputs = decoder_inputs.unsqueeze(dim=1)
 
             #################################################
             #           입력을 topk 만큼 복제
             #################################################
-<<<<<<< HEAD
-            # [batch, 1, hidden] -> [batch *topk, 1, hidden] -> 묶음으로 repeat됨
-=======
             # [batch, 1, hidden] -> [batch, topk, hidden]  -> [batch *topk, 1, hidden] -> 묶음으로 repeat됨 앞에 단위를 게속 반복하는 느낌
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
             decoder_inputs = decoder_inputs.repeat(1, self.beam_size, 1).view(-1, 1, self.hidden_size)
             encoder_outputs = encoder_outputs.repeat(1, self.beam_size, 1, 1).view(-1, max_sent, self.hidden_size)
             sent_attention_masks = sent_attention_masks.repeat(1, self.beam_size, 1).view(-1, 1, max_sent)
@@ -417,32 +371,16 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             evidence_sentences = torch.tensor(evidence_sentences, dtype=torch.long).cuda()
             self.evidence = evidence_vector
             attention_scores = attention_scores.squeeze(2).transpose(0, 1)
-<<<<<<< HEAD
-
-=======
             self.sentence_number = evidence_sentences
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
         ##############################################################################
         #                   evidence_vector 만들었음                                  #
         ##############################################################################
         # element 합으로 수정
         all_path_logits = []
         for path in range(self.beam_size):
-<<<<<<< HEAD
             tmp_hidden_states = hidden_states + self.evidence[:, path, :].unsqueeze(1)
-=======
-            # hidden_states : (batch, max_length, hidden)
-            # self.evidence : (batch, 1, hidden)
 
-            # weight = nn.Sigmoid(hidden_states.bmm(self.evidence.transpose(1, 2)) / d_k) : (batch, max_length, 1)
-            # weighted_evidence = weight * self.evidence : (batch, max_length, hidden)
-            # last_hidden = self.w1(torch.cat([hidden_states, weighted_evidence], -1))
-            #                   : (batch, max_length, hidden*2) -> (batch, max_length, hidden)
-            # logits = self.lm_head(last_hidden)
-
-            # tmp_hidden_states = hidden_states + self.evidence[:, path, :].unsqueeze(1)
             tmp_hidden_states = hidden_states
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
             all_path_logits.append(self.lm_head(tmp_hidden_states).float())
 
         loss = None
@@ -450,29 +388,17 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         if labels is not None and Flag == True:  # 학습하는 과정
             # Shift so that tokens < n predict n
             label_losses = []
-<<<<<<< HEAD
-=======
 
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
             # logits : [batch, max_length, vocab]
             loss_fct = CrossEntropyLoss()
 
             for logits in all_path_logits:
-<<<<<<< HEAD
-                batch_loss = []
-                for batch_idx in range(batch_size):
-                    shift_logits = logits[
-                        ..., :-1, :
-                    ].contiguous()  # logits의 맨 뒤에 하나 뺀거 즉 end 토큰 빼고 나서 걔랑
-                    shift_labels = labels[..., 1:].contiguous()  # label에 대한 처음부터 값이 동일해야함..
-=======
                 for batch_idx in range(batch_size):
 
                     shift_logits = logits[batch_idx][
                         ..., :-1, :
                     ].contiguous()  # logits의 맨 뒤에 하나 뺀거 즉 end 토큰 빼고 나서 걔랑
                     shift_labels = labels[batch_idx][..., 1:].contiguous()  # label에 대한 처음부터 값이 동일해야함..
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
                     # Flatten the tokens
 
                     shift_logits = shift_logits.view(-1, self.config.vocab_size)
@@ -480,19 +406,11 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
                     # Enable model parallelism
                     shift_labels = shift_labels.to(shift_logits.device)
                     loss = loss_fct(shift_logits, shift_labels)
-<<<<<<< HEAD
-                    batch_loss.append(loss)
-                # 최종 loss 계산
-                label_losses.append(batch_loss)
-            label_losses = torch.tensor(label_losses)
-            span_loss = label_losses.cuda()
-=======
 
                     # 최종 loss 계산
                     label_losses.append(loss)
             label_losses = torch.stack(label_losses, 0)
             span_loss = label_losses.view(-1, batch_size)
->>>>>>> 11d7d8a4757072d730dfacc957f0a3763ec1975f
 
         if not return_dict:
             output = (all_path_logits[0],) + outputs[1:]
