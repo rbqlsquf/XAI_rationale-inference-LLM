@@ -211,19 +211,17 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         self.gru = gru
         
     def save_pn_model(self, model_path):
-        torch.save(self.gru.state_dict(), os.path.join(model_path, "model.pt"))
+        state_dict = {
+            'gru': self.gru.state_dict(),
+            'linear_w1': self.linear_w1.state_dict()
+        } 
+        torch.save(state_dict, os.path.join(model_path, "model.pt"))
 
     def load_pn_model(self, model_path):
-        self.gru.load_state_dict(torch.load(os.path.join(model_path, "model.pt")))
-
-    # def generate(self, input_ids, **kwargs):
-    #     # 새로운 인자 처리 예시
-    #     sent_masks = kwargs.get("sent_masks", None)  # 추가 인자 예시
-    #     # 필요한 로직을 여기에 추가
-    #     # 예를 들어, new_arg를 사용할 수 있도록 모델 forward 함수에 추가
-    #     outputs = super().generate(input_ids, **kwargs)
-    #     return outputs
-
+        state_dict = torch.load(os.path.join(model_path, "model.pt"))
+        self.gru.load_state_dict(state_dict['gru'])
+        self.linear_w1.load_state_dict(state_dict['linear_w1'])
+    
     def forward(
         self,
         input_ids: torch.LongTensor = None,

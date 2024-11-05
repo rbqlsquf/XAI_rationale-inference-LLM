@@ -6,13 +6,15 @@ import json
 from peft import PeftModel, PeftConfig
 from datasets import Dataset
 
-from modeling_qwen2_pn import Qwen2ForCausalLM_pn
+from modeling_qwen2_pn_att import Qwen2ForCausalLM_pn, BeamSearchAttentionDecoder
 import argparse
 
 
 def create_model(base_model_path, lora_path, config):
     tokenizer = AutoTokenizer.from_pretrained(base_model_path)
     trained_model = Qwen2ForCausalLM_pn.from_pretrained(lora_path, config=config, device_map="auto")
+    gru = BeamSearchAttentionDecoder(hidden_size=config.hidden_size, num_sent=config.max_dec_len, topk=config.beam_size)
+    trained_model.set_gru(gru)
     trained_model.config.use_cache = False
     tokenizer.padding_side = "left"
     trained_model.load_pn_model(lora_path)
