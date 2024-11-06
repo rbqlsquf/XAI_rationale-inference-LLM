@@ -26,18 +26,15 @@ from transformers import AutoTokenizer
 from dataclasses import dataclass
 from torch.nn import functional as F
 import os
-import torch.nn.init as init
 
 class BeamSearchAttentionDecoder(nn.Module):
     def __init__(self, hidden_size, num_sent, topk=1):
         super(BeamSearchAttentionDecoder, self).__init__()
         self.hidden_size = hidden_size
         self.num_sent = num_sent
-        self.dense1 = nn.Linear(in_features=hidden_size, out_features=hidden_size)
-        self.dense2 = nn.Linear(in_features=hidden_size, out_features=hidden_size)
-        self.dense3 = nn.Linear(in_features=hidden_size * 2, out_features=hidden_size)
+        
 
-        self.decoder = nn.GRU(input_size=hidden_size, hidden_size=hidden_size, num_layers=1, batch_first=True, bias=False)
+        self.decoder = nn.GRU(input_size=hidden_size, hidden_size=hidden_size, batch_first=True, num_layers=1)
 
         self.div_term = math.sqrt(hidden_size)
         self.topk = topk
@@ -63,10 +60,11 @@ class BeamSearchAttentionDecoder(nn.Module):
         batch_size = decoder_inputs.size(0)
         max_sent = encoder_outputs.size(1)
         indexes = [e for e in range(batch_size)]
-        key_encoder_outputs = self.dense1(encoder_outputs)
-        key_encoder_outputs = key_encoder_outputs + encoder_outputs
-        value_encoder_outputs = self.dense2(encoder_outputs)
-        value_encoder_outputs = value_encoder_outputs + encoder_outputs
+        key_encoder_outputs = encoder_outputs
+        value_encoder_outputs = key_encoder_outputs
+        # key_encoder_outputs = key_encoder_outputs + encoder_outputs
+        # value_encoder_outputs = self.dense2(encoder_outputs)
+        # value_encoder_outputs = value_encoder_outputs + encoder_outputs
 
         # key : (batch, seq, hidden)
         # value : (batch, seq, hidden)
@@ -85,9 +83,9 @@ class BeamSearchAttentionDecoder(nn.Module):
         context = attn_alignment.bmm(value_encoder_outputs)
         # context : (batch*topk, 1, hidden)
 
-        hidden_states = torch.cat([context, output], -1)
+        #hidden_states = torch.cat([context, output], -1)
         # result : [batch*topk, 1, hidden]
-        result = self.dense3(hidden_states)  # context와 output을 concat한 값
+        result = context # self.dense3(hidden_states)  # context와 output을 concat한 값
 
         #################################################################
         #                일단 Greedy 하게 진행
@@ -201,7 +199,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         self.beam_size = config.beam_size
         self.linear_w1 = nn.Linear(in_features=config.hidden_size * 2, out_features=config.hidden_size)
         self.gru = None
-        self.decoder = nn.GRU(input_size=config.hidden_size, hidden_size=config.hidden_size, num_layers=1, bias=False)
+        
         self.max_dec_len = config.max_dec_len
         self.hidden_size = config.hidden_size
         
@@ -349,6 +347,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             evidence_scores = None
             evidence_sentences = []
             attention_scores = []
+            evidence_vectors = []
             #################################################
             #               디코더 들어갈 위치               #
             #################################################
@@ -369,8 +368,12 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
                     evidence_scores,
                     evidence_sentences,
                 )
+                reshape_decoder_inputs = decoder_inputs.view(-1, self.beam_size, self.hidden_size)
+                evidence_vectors.append(reshape_decoder_inputs)
 
-            evidence_vector = decoder_inputs.view(-1, self.beam_size, self.hidden_size)
+            evidence_vector = torch.stack(evidence_vectors, 0).permute(2, 1, 3, 0)
+            # (dec_len, batch, beam_size, hidden) => (beam_size, batch, hidden, dec_len)
+            
             evidence_sentences = torch.tensor(evidence_sentences, dtype=torch.long).cuda()
             self.evidence = evidence_vector
             attention_scores = attention_scores.squeeze(2).transpose(0, 1)
@@ -385,10 +388,10 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             # self.evidence : (batch, 1, hidden)
 
             #: (batch, max_length, 1)
+            cur_evidence = self.evidence[path] # (batch, hidden, dec_len)
             d_k = hidden_states.size(2)
-            weight = F.sigmoid(hidden_states.bmm(self.evidence.transpose(1, 2)) / math.sqrt(d_k))
-            # : (batch, max_length, hidden)
-            weighted_evidence = weight * self.evidence
+            weight = F.softmax(hidden_states.bmm(cur_evidence) / math.sqrt(d_k), dim=-1) # (batch, max_length, dec_len)
+            weighted_evidence = weight.bmm(cur_evidence.transpose(1, 2)) # (batch, max_length, hidden)
             tmp_hidden_states = self.linear_w1(torch.cat([hidden_states, weighted_evidence], -1))
             #                   : (batch, max_length, hidden*2) -> (batch, max_length, hidden)
             # logits = self.lm_head(last_hidden)
