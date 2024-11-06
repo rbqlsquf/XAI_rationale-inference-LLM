@@ -183,11 +183,11 @@ if __name__ == "__main__":
     parser.add_argument("--data_file", type=str, default="data/1029data/hotpot_dev_supporting.json")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
-    parser.add_argument("--output_dir", type=str, default="result/1105_noloss/hotpot_tt_5000.json")
+    parser.add_argument("--output_dir", type=str, default="result/1105_noloss/hotpot_tf_5000.json")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--data_sample", type=bool, default=True)
     parser.add_argument("--mrc_value", type=str, default=True)
-    parser.add_argument("--sum_value", type=str, default=True)
+    parser.add_argument("--sum_value", type=str, default=False)
     args = parser.parse_args()
     print(args)
     #########################################################
