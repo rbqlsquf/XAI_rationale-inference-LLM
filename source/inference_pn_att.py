@@ -17,6 +17,7 @@ def create_model(base_model_path, lora_path, config):
     trained_model.set_gru(gru)
     trained_model.config.use_cache = False
     tokenizer.padding_side = "left"
+    print("LORA WEIGHT LOADING")
     trained_model.load_pn_model(lora_path)
     return tokenizer, trained_model
 
