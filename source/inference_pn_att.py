@@ -6,13 +6,15 @@ import json
 from peft import PeftModel, PeftConfig
 from datasets import Dataset
 
-from modeling_qwen2_pn_att import Qwen2ForCausalLM_pn
+from modeling_qwen2_pn_att import Qwen2ForCausalLM_pn, BeamSearchAttentionDecoder
 import argparse
 
 
 def create_model(base_model_path, lora_path, config):
     tokenizer = AutoTokenizer.from_pretrained(base_model_path)
     trained_model = Qwen2ForCausalLM_pn.from_pretrained(lora_path, config=config, device_map="auto")
+    gru = BeamSearchAttentionDecoder(hidden_size=config.hidden_size, num_sent=config.max_dec_len, topk=config.beam_size)
+    trained_model.set_gru(gru)
     trained_model.config.use_cache = False
     tokenizer.padding_side = "left"
     trained_model.load_pn_model(lora_path)
@@ -177,15 +179,15 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--base_model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--train_model_path", type=str, default="model/qwen_lora_1101/checkpoint-9000")
+    parser.add_argument("--train_model_path", type=str, default="model/1105_noloss/checkpoint-16600")
     parser.add_argument("--data_file", type=str, default="data/1029data/hotpot_dev_supporting.json")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
-    parser.add_argument("--output_dir", type=str, default="result/qwen_lora_1101/hotpot_tt.json")
+    parser.add_argument("--output_dir", type=str, default="result/1105_noloss/test.json")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--data_sample", type=bool, default=True)
     parser.add_argument("--mrc_value", type=str, default=True)
-    parser.add_argument("--sum_value", type=str, default=True)
+    parser.add_argument("--sum_value", type=str, default=False)
     args = parser.parse_args()
     print(args)
     #########################################################
