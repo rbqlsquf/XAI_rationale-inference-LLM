@@ -37,7 +37,7 @@ class BeamSearchAttentionDecoder(nn.Module):
         self.decoder = nn.GRU(input_size=hidden_size, hidden_size=hidden_size, batch_first=True, num_layers=1)
 
         self.div_term = math.sqrt(hidden_size)
-        self.topk = topk
+        self.topk = topk #beam_size랑 동일, 인자로 첨부터 넘겨받긴함
 
              
     def forward(
@@ -85,11 +85,19 @@ class BeamSearchAttentionDecoder(nn.Module):
 
         #hidden_states = torch.cat([context, output], -1)
         # result : [batch*topk, 1, hidden]
-        result = context # self.dense3(hidden_states)  # context와 output을 concat한 값
+        # result = context # self.dense3(hidden_states)  # context와 output을 concat한 값
+        tmp_list = []
+        tmp_evi_sentence_index = attn_alignment.argmax(dim=-1)
+        for batch_idx in range(batch_size):
+            tmp_list.append(encoder_outputs[batch_idx, tmp_evi_sentence_index[batch_idx], :].squeeze(0))
+        
+        evi_sent_representation = torch.stack(tmp_list)
+        # evi_sent_representation = torch.stack([encoder_outputs[batch_idx, evidence_sentence_index[batch_idx], :]] for batch_idx in range(batch_size))
+        result = evi_sent_representation.unsqueeze(1)
 
-        #################################################################
-        #                일단 Greedy 하게 진행
-        #################################################################
+        ##################################################################
+        #               beam search 계산
+        ##################################################################
         tmp_result = []
         tmp_hidden = []
         tmp_attention_mask = []
@@ -102,7 +110,8 @@ class BeamSearchAttentionDecoder(nn.Module):
         # sentences = torch.argmax(attn_alignment, -1)
         # scores = attn_alignment[:, :, torch.argmax(attn_alignment)]
         # evidence_scores : [batch,topk]
-
+        #encoder_outputs : [batch, sent_len, hidden]
+        
         # 두번째 decoding step!
         if evidence_scores is not None:
             ####################################################################
@@ -185,6 +194,8 @@ class BeamSearchAttentionDecoder(nn.Module):
         # decoder_inputs, last_hidden, evidence_sentences, attention_scores, sent_attention_masks, evidence_scores,
         # evidence_scores : path 별 누적 점수 (beam search에서 상위 N개 뽑을때 사용)
         # attention_scores : 각 decoding step 별 문장 추출 logits
+        
+        
         return result, hidden, evidence_sentence_index, attention_scores, attention_mask, evidence_scores
 
 
@@ -368,6 +379,10 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
                     evidence_scores,
                     evidence_sentences,
                 )
+                ########################################################################################
+                #   디코더 입력을 sentence_representation의 근거 문장 부분만으로 가지고 옴
+                ########################################################################################
+                #[batch, beam_size, hidden]
                 reshape_decoder_inputs = decoder_inputs.view(-1, self.beam_size, self.hidden_size)
                 evidence_vectors.append(reshape_decoder_inputs)
 
