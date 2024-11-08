@@ -36,10 +36,10 @@ def create_example(all_example, tokenizer):
             ]
         else:  # MRC의 경우
             messages = [
-                {
-                    "role": "system",
-                    "content": f"<|MRC|>True<|SUM|>True",
-                },
+                # {
+                #     "role": "system",
+                #     "content": f"<|MRC|>True<|SUM|>True",
+                # },
                 {"role": "user", "content": f"**Question:{example['question']}\n{example['document']}"},
             ]
 

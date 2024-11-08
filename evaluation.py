@@ -52,19 +52,15 @@ def evaluate_supporting_facts(gold_sp, pred_sp):
     return em, precision, recall, f1
 
 import json
+file_path = "data/1029data/hotpot_dev_supporting.json"
+with open(file_path, 'r', encoding='utf-8') as f:
+    dev_data = json.load(f)
 
-for i in range(1,11):
-    f_name = f'result/1106_weighted_rationale+noloss/hotpot_tt_{i}000.json'
+for i in range(1,8):
+    f_name = f'result/1106_weighted_sum/hotpot_tt_{i}000.json'
 
     with open(f_name, "r", encoding="utf-8") as file:
         test_data = json.load(file)
-        
-    file_path = "data/1029data/hotpot_dev_supporting.json"
-    with open(file_path, 'r', encoding='utf-8') as f:
-        dev_data = json.load(f)
-        
-        
-        
     score = []
     all_em_score = []
     all_precision_score = []
