@@ -6,7 +6,7 @@ import json
 from peft import PeftModel, PeftConfig
 from datasets import Dataset
 
-from modeling_qwen2_pn_att import Qwen2ForCausalLM_pn, BeamSearchAttentionDecoder
+from modeling_qwen2_pn_att_1106 import Qwen2ForCausalLM_pn, BeamSearchAttentionDecoder
 import argparse
 
 
