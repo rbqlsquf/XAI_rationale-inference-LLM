@@ -14,7 +14,7 @@ from transformers import (
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 from peft import LoraConfig, get_peft_model
 import wandb
-from modeling_qwen2_pn_att import Qwen2ForCausalLM_pn, BeamSearchAttentionDecoder
+from modeling_qwen2_pn_att_sum import Qwen2ForCausalLM_pn, BeamSearchAttentionDecoder
 from nltk.translate.bleu_score import sentence_bleu
 from torch.nn import functional as F
 import argparse
