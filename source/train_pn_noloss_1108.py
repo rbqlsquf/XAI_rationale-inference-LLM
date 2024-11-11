@@ -114,7 +114,6 @@ def process_func(example, tokenizer):
     else:
         sum_value = "False"
 
-    task_instruction = "Only fill in the **Answer to the **Question based on the **Document if <|MRC|> is True. Do not fill in the **Answer if the Question is not provided or if <|MRC|> is False. Only fill in the **Summary with a summary of the **Document if <|SUM|> is True. Do not fill in the **Summary if <|SUM|> is False."
     example["document"] = example["document"].strip()
     # token 된 doc
     token_doc = {"input_ids": [], "attention_mask": []}
@@ -141,7 +140,9 @@ def process_func(example, tokenizer):
         f"<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n",
         add_special_tokens=False,
     )
-    response = tokenizer(f"<|im_start|>assistant\n**Answer:\n**Summary:\n<|im_end|>\n", add_special_tokens=False)
+    response = tokenizer(
+        f"<|im_start|>assistant\n**Answer:{example['output'].strip()}\n<|im_end|>\n", add_special_tokens=False
+    )
 
     # instruction에 대한 문장 번호
     sentence_position = [0] * len(instruction["input_ids"]) + sentence_position
@@ -176,7 +177,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_dec_len", type=int, default=3)
     parser.add_argument("--new_model", type=str, default="new_model")
     parser.add_argument("--wandb_project", type=str, default="llm pointer network")
-    parser.add_argument("--wandb_run_name", type=str, default="1103+loss")
+    parser.add_argument("--wandb_run_name", type=str, default="test")
     parser.add_argument("--output_dir", type=str, default="qwen_lora_1026")
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=2)
@@ -225,7 +226,7 @@ if __name__ == "__main__":
     ##############################################################
     wandb.init(project=args.wandb_project, save_code=True)
     wandb.run.name = args.wandb_run_name
-
+    wandb.save("modeling_qwen2_pn_att_1106_lmhead.py")
     ##############################################################
     training_params = TrainingArguments(
         output_dir=args.output_dir,
