@@ -13,7 +13,7 @@ from transformers import (
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 from peft import LoraConfig, get_peft_model
 import wandb
-from modeling_qwen2_pn_att_1106 import Qwen2ForCausalLM_pn, BeamSearchAttentionDecoder
+from modeling_qwen2_pn_att_1107 import Qwen2ForCausalLM_pn, BeamSearchAttentionDecoder
 from nltk.translate.bleu_score import sentence_bleu
 from torch.nn import functional as F
 import argparse
@@ -70,11 +70,13 @@ class CustomTrainer(Trainer):
             real_input_len = []
             for k in range(r_batch_size):
                 target_value = tokenizer.encode("<|im_start|>")[0]
-                target_value_2 = tokenizer.encode("<|im_end|>")[0]
+                # target_value_2 = tokenizer.encode("<|im_end|>")[0]
+                target_value_2 = tokenizer.encode("**Document:\n")[0]
                 im_start_index = (inputs["input_ids"][k] == target_value).nonzero(as_tuple=True)[0][0].item()
-                im_end_index = (inputs["input_ids"][k] == target_value_2).nonzero(as_tuple=True)[0][0].item()
-                sentences = inputs["input_ids"][k][im_start_index : im_end_index + 1]
-                sentences = sentences.tolist() + tokenizer.encode("\n<|im_start|>user\n**Document:\n")
+                im_end_index = (inputs["input_ids"][k] == target_value_2).nonzero(as_tuple=True)[0][1].item()
+                sentences = inputs["input_ids"][k][im_start_index : im_end_index + 3]
+                # sentences = sentences.tolist() + tokenizer.encode("\n<|im_start|>user\n**Document:\n")
+                sentences = sentences.tolist()
                 tmp_sentence_mask = [0] * len(sentences)
 
                 see_tokens = []
@@ -345,6 +347,20 @@ def create_model(model_path, config):
     return tokenizer, model
 
 
+def create_model_for_debug(base_model_path, lora_path, config):
+    tokenizer = AutoTokenizer.from_pretrained(base_model_path)
+    trained_model = Qwen2ForCausalLM_pn.from_pretrained(lora_path, config=config, device_map="auto")
+    gru = BeamSearchAttentionDecoder(
+        hidden_size=config.hidden_size, num_sent=config.max_dec_len, topk=config.beam_size
+    )
+    trained_model.set_gru(gru)
+    trained_model.config.use_cache = False
+    tokenizer.padding_side = "left"
+    print("LORA WEIGHT LOADING")
+    trained_model.load_pn_model(lora_path)
+    return tokenizer, trained_model
+
+
 IGNORE_INDEX = -100
 
 
@@ -389,7 +405,7 @@ def process_func(example, tokenizer):
         add_special_tokens=False,
     )
     response = tokenizer(
-        f"<|im_start|>assistant\n**Answer:{example['output'].strip()}\n<|im_end|>\n", add_special_tokens=False
+        f"<|im_start|>assistant\n**Answer:{example['output'].strip()}<|im_end|>\n", add_special_tokens=False
     )
 
     # instruction에 대한 문장 번호
@@ -421,7 +437,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
     parser.add_argument("--data_file", type=str, default="data/1108data/hotpot_f_shuffled.json")
-    parser.add_argument("--beam_size", type=int, default=3)
+    parser.add_argument("--lora_path", type=str, default="model/1111_1107_yesloss_concat/checkpoint-1000")
+    parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
     parser.add_argument("--new_model", type=str, default="new_model")
     parser.add_argument("--wandb_project", type=str, default="llm pointer network")
@@ -443,11 +460,12 @@ if __name__ == "__main__":
     config.max_dec_len = args.max_dec_len
 
     tokenizer, model = create_model(model_path, config)
+    # tokenizer, model = create_model_for_debug(model_path, args.lora_path, config)
     data_file = args.data_file
     print("학습 데이터 : ", data_file)
     dataset = Dataset.from_json(data_file)
     if args.data_sample:
-        dataset = dataset.select(range(100))
+        dataset = dataset.select(range(10))
     processed_dataset = dataset.map(lambda example: process_func(example, tokenizer))
 
     new_model = args.new_model
