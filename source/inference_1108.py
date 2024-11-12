@@ -36,8 +36,6 @@ class InferenceInput:
 
 def create_example(all_example, tokenizer, data_sample, mrc_value, sum_value):
     all_result = []
-
-    task_instruction = "Only fill in the **Answer to the **Question based on the **Document if <|MRC|> is True. Do not fill in the **Answer if the Question is not provided or if <|MRC|> is False. Only fill in the **Summary with a summary of the **Document if <|SUM|> is True. Do not fill in the **Summary if <|SUM|> is False."
     for example in tqdm(all_example):
         example["document"] = example["document"].strip()
         # token 된 doc
@@ -119,7 +117,7 @@ def generate_batch_answer(batches, tokenizer, model):
                 input_ids=input_batch["input_ids"],
                 attention_mask=input_batch["attention_mask"],
                 sent_masks=input_batch["sent_masks"],
-                max_new_tokens=200,
+                max_new_tokens=50,
             )
 
         input_text = [tokenizer.decode(input_id, skip_special_tokens=True) for i, input_id in enumerate(input_ids)]
@@ -174,8 +172,7 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=str, default="result/1111_1107_yesloss_concat/hotpot_2400.json")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--data_sample", type=bool, default=True)
-    parser.add_argument("--mrc_value", type=str, default=True)
-    parser.add_argument("--sum_value", type=str, default=True)
+
     args = parser.parse_args()
     print(args)
     #########################################################
