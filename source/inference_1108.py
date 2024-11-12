@@ -34,7 +34,7 @@ class InferenceInput:
         self.gold_sp = gold_sp
 
 
-def create_example(all_example, tokenizer, data_sample, mrc_value, sum_value):
+def create_example(all_example, tokenizer, data_sample):
     all_result = []
     for example in tqdm(all_example):
         example["document"] = example["document"].strip()
