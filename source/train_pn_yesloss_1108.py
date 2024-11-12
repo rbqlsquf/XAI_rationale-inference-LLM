@@ -440,7 +440,7 @@ if __name__ == "__main__":
     parser.add_argument("--lora_path", type=str, default="model/1112_yesloss/checkpoint-1000")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
-    parser.add_argument("--new_model", type=str, default="new_model")
+    parser.add_argument("--new_model", type=str, default="new_mode")
     parser.add_argument("--wandb_project", type=str, default="llm pointer network")
     parser.add_argument("--wandb_run_name", type=str, default="test")
     parser.add_argument("--output_dir", type=str, default="qwen_lora_1026")

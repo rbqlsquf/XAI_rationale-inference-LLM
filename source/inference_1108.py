@@ -83,7 +83,7 @@ def create_example(all_example, tokenizer, data_sample, mrc_value, sum_value):
             )
         )
         if data_sample:
-            if len(all_result) == 30:
+            if len(all_result) == 100:
                 break
     return all_result
 
@@ -189,7 +189,7 @@ if __name__ == "__main__":
     with open(args.data_file, "r", encoding="utf-8") as file:
         dev_data = json.load(file)
 
-    input_data = create_example(dev_data, tokenizer, args.data_sample, args.mrc_value, args.sum_value)
+    input_data = create_example(dev_data, tokenizer, args.data_sample)
 
     # Create batches of input items
     batches = list(create_batches(input_data, args.batch_size))

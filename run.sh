@@ -1,18 +1,16 @@
 PYTHON_PATH="/home/rbqlsquf2/workspace/XAI_rationale-inference-LLM/.venv/bin/python"
 
 BASE_DIR="/home/rbqlsquf2/workspace/XAI_rationale-inference-LLM"
-MODEL_DIR="model/1111_1107_yesloss_concat"
-OUTPUT_DIR="$BASE_DIR/result/1111_1107_yesloss_concat"
+MODEL_DIR="model/1112_yesloss"
+OUTPUT_DIR="$BASE_DIR/result/1112_yesloss"
 SOURCE_DIR="$BASE_DIR/source"
 SCRIPT_NAME="inference_1108.py"
 
-for i in {30..60..10}; do
+for i in {2..12..2}; do
     checkpoint=$((i * 100))
     $PYTHON_PATH $SOURCE_DIR/$SCRIPT_NAME \
-        --mrc_value "False" \
-        --sum_value "True" \
         --train_model_path "$MODEL_DIR/checkpoint-$checkpoint" \
-        --output_dir "$OUTPUT_DIR/hotpot_ft_$checkpoint.json"
+        --output_dir "$OUTPUT_DIR/$checkpoint.json"
 done
 
 
