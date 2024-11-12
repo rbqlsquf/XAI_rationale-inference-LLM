@@ -367,17 +367,6 @@ IGNORE_INDEX = -100
 def process_func(example, tokenizer):
     MAX_LENGTH = 2048
     input_ids, attention_mask, labels = [], [], []
-    mrc_value = -1
-    sum_value = -1
-    if example["mrc_type"] == "T":
-        mrc_value = "True"
-    else:
-        mrc_value = "False"
-    if example["sum_type"] == "T":
-        sum_value = "True"
-    else:
-        sum_value = "False"
-
     example["document"] = example["document"].strip()
     # token 된 doc
     token_doc = {"input_ids": [], "attention_mask": []}
