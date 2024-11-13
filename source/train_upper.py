@@ -103,6 +103,8 @@ class CustomTrainer(Trainer):
         print("========================================")
         print(self.state.global_step)
         print("loss:{}".format(loss))
+        print("loss_mean:{}".format(loss[0, :].mean()))
+        print("loss_2:{}".format(loss_2))
         print("r_loss : {}".format(r_loss))
         # Add wandb logging for the evidence losses
         # Detailed wandb logging
@@ -212,7 +214,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--data_sample", type=bool, default=True)
+    parser.add_argument("--data_sample", type=bool, default=False)
     args = parser.parse_args()
     print(args)
     #########################################################
