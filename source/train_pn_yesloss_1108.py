@@ -33,7 +33,6 @@ class CustomDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
             max_length = max(len(mask) for mask in sentence_masks)
             padded_sentence_masks = [[0] * (max_length - len(mask)) + mask for mask in sentence_masks]
             batch["sent_masks"] = torch.tensor(padded_sentence_masks)
-
         return batch
 
 
@@ -436,7 +435,7 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--data_file", type=str, default="data/1112data/hotpot_train.json")
+    parser.add_argument("--data_file", type=str, default="data/1112data/hotpot_train_shuffle.json")
     parser.add_argument("--lora_path", type=str, default="model/1112_yesloss/checkpoint-1000")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
@@ -465,7 +464,7 @@ if __name__ == "__main__":
     print("학습 데이터 : ", data_file)
     dataset = Dataset.from_json(data_file)
     if args.data_sample:
-        dataset = dataset.select(range(10))
+        dataset = dataset.select(range(100))
     processed_dataset = dataset.map(lambda example: process_func(example, tokenizer))
 
     new_model = args.new_model

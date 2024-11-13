@@ -23,18 +23,29 @@ from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 class CustomDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
     def __call__(self, features):
         # sentence_masks를 제외한 features 리스트 생성
-        features_without_masks = [{k: v for k, v in f.items() if k != "sent_masks"} for f in features]
-
+        features_without_masks = [
+            {k: v for k, v in f.items() if k != "sent_masks" and k != "gold_sp"} for f in features
+        ]
         # 부모 클래스에서 features_without_masks 처리
         batch = super().__call__(features_without_masks)
 
         sentence_masks = [f.get("sent_masks", None) for f in features]
+        gold_sp = [f.get("gold_sp", None) for f in features]
         # sentence_masks가 None이 아닌 경우 패딩 처리
         if sentence_masks[0] is not None:
             max_length = max(len(mask) for mask in sentence_masks)
             padded_sentence_masks = [[0] * (max_length - len(mask)) + mask for mask in sentence_masks]
             batch["sent_masks"] = torch.tensor(padded_sentence_masks)
-
+        if gold_sp[0] is not None:
+            max_length = 3
+            padded_sentence_masks = []
+            for sp in gold_sp:
+                if len(sp) > max_length:
+                    sp = sp[:max_length]
+                # Pad if shorter than max_length
+                padded_sp = sp + [0] * (max_length - len(sp))
+                padded_sentence_masks.append(padded_sp)
+            batch["gold_sp"] = torch.tensor(padded_sentence_masks)
         return batch
 
 
@@ -84,9 +95,11 @@ class CustomTrainer(Trainer):
 
         ###############
         loss_fct_2 = CrossEntropyLoss()
-        loss_2 = loss_fct_2(sampled_evidence_sentence, inputs["gold_sp"])
+        loss_2 = loss_fct_2(
+            sampled_evidence_scores.view(-1, sampled_evidence_scores.size(-1)), inputs["gold_sp"].view(-1)
+        )
 
-        r_loss = loss[0, :].mean()
+        r_loss = (loss[0, :].mean() + loss_2) / 2
         print("========================================")
         print(self.state.global_step)
         print("loss:{}".format(loss))
@@ -177,6 +190,7 @@ def process_func(example, tokenizer):
         "attention_mask": attention_mask,
         "labels": labels,
         "sent_masks": sentence_position,
+        "gold_sp": example["supporting_num"],
     }
 
 

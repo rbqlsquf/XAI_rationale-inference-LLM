@@ -185,7 +185,7 @@ class BeamSearchAttentionDecoder(nn.Module):
             attention_scores = attn_outputs.unsqueeze(0)
 
         # 근거 문장의 확률 낮춤
-        attention_mask[indexes, 0, evidence_sentences] = -1e10
+        # attention_mask[indexes, 0, evidence_sentences] = -1e10
         # evidence_scores : [batch, topk 여야함]
         # evidence_sentence_index : 리스트 각 batch마다 이제 근거 문장들이 들어갈 예정
         # attention_scores : [batch, 1, max_sent]
@@ -240,7 +240,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         sent_masks: Optional[torch.Tensor] = None,
-        **kwargs,
+        gold_sp: Optional[torch.Tensor] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -300,7 +300,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             sent_attention_masks = sent_attention_masks.float()
 
             # 질문 부분을 무시하기 위함
-            sent_attention_masks[:, 0] = 1
+            # sent_attention_masks[:, 0] = 1
 
             # 신경써야할 부분 -> 문장들이 있는 경우(이 때 질문 instruction 부분 제외)
             # mm : [batch, max_sent]

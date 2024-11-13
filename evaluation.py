@@ -64,7 +64,7 @@ file_path = "data/1029data/hotpot_dev_supporting.json"
 with open(file_path, "r", encoding="utf-8") as f:
     dev_data = json.load(f)
 
-for i in range(92, 98, 2):
+for i in range(98, 108, 2):
     f_name = f"result/1112_yesloss/{i}00.json"
 
     with open(f_name, "r", encoding="utf-8") as file:
