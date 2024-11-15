@@ -64,8 +64,8 @@ file_path = "data/1029data/hotpot_dev_supporting.json"
 with open(file_path, "r", encoding="utf-8") as f:
     dev_data = json.load(f)
 
-for i in range(9, 11):
-    f_name = f"result/1106_weighted_rationale+noloss/hotpot_tt_{i}000.json"
+for i in range(18, 20, 2):
+    f_name = f"result/1115_yesloss_final/{i}00.json"
 
     with open(f_name, "r", encoding="utf-8") as file:
         test_data = json.load(file)
@@ -81,9 +81,13 @@ for i in range(9, 11):
         assert dev["_id"] == data["_id"]
         predict = ""
         answer = (
-            data["answer"].split("**Summary:")[0].replace("**Answer:", "").replace("<|im_start|>assistant", "").strip()
+            data["answer"]
+            .replace("**Answer:", "")
+            .replace("<|im_start|>assistant", "")
+            .replace("<|im_end|>", "")
+            .strip()
         )
-        generated_text = data["generated_text"].split("**Summary:")[0].replace("**Answer:", "").strip()
+        generated_text = data["generated_text"].replace("**Answer:", "").strip()
         if answer == "yes":
             if answer in generated_text.lower() and "no" not in generated_text.lower():
                 generated_text = "yes"
@@ -100,7 +104,8 @@ for i in range(9, 11):
         result_em.append(exact_match_score(predict, answer))
         ################################################
         gold_sp = data["gold_sp"]
-        pred_sp = data["pred_sp"]
+        # pred_sp = data["pred_sp"]
+        pred_sp = [x for x in data["pred_sp"] if x != 0]
         em, precision, recall, f1 = evaluate_supporting_facts(gold_sp, pred_sp)
         all_em_score.append(em)
         all_precision_score.append(precision)

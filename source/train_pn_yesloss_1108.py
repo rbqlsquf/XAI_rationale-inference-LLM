@@ -80,16 +80,17 @@ class CustomTrainer(Trainer):
                 ################################################################
                 #       see_tokens는 근거 문장 자체로 정의
                 ################################################################
-                for j in range(config.max_dec_len):
-                    see_tokens.extend(
-                        (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
-                    )
-                    tmp_sentence_mask = tmp_sentence_mask + [j + 1] * len(
-                        (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
-                    )
-                tmp_input_ids = (
-                    sentences + inputs["input_ids"][k][see_tokens].tolist() + tokenizer.encode("<|im_end|>\n")
-                )
+                tmp_input_ids = sentences
+                for m in range(5):
+                    for j in range(config.max_dec_len):
+                        see_tokens = (
+                            (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
+                        )
+                        tmp_input_ids = tmp_input_ids + (inputs["input_ids"][k][see_tokens].tolist())
+                        tmp_sentence_mask = tmp_sentence_mask + [j + m * config.max_dec_len + 1] * len(
+                            (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
+                        )
+                tmp_input_ids = tmp_input_ids + tokenizer.encode("<|im_end|>\n")
                 tmp_sentence_mask = tmp_sentence_mask + [0] * 2
                 ignore_padding_index = (inputs["labels"][k] == -100).nonzero(as_tuple=True)[0]
                 tmp_labels = [IGNORE_INDEX] * (len(tmp_input_ids))  # 엔터랑 eos까지 더해주기
@@ -165,9 +166,10 @@ class CustomTrainer(Trainer):
             e_predicted = evidence_predicted_answer[path]
             # batch 단위로 나옴
             for batch_id, (pred_, e_pred_) in enumerate(zip(predicted, e_predicted)):
-                e_pred = e_pred_.replace("assistant\n**Answer:", "").lower().split(" ")
-                pred = pred_.replace("assistant\n**Answer:", "").lower().split(" ")
-                gold = gold_list[batch_id].replace("assistant\n**Answer:", "").lower().split(" ")
+                e_pred = e_pred_.replace("assistant\n**Answer:", "").strip().lower().split(" ")
+                pred = pred_[pred_.index("Answer:") + len("Answer:") :].strip().lower().split(" ")
+                # pred = pred_.replace("assistant\n**Answer:", "").lower().split(" ")
+                gold = gold_list[batch_id].replace("assistant\n**Answer:", "").strip().lower().split(" ")
                 f1 = sentence_bleu([pred], e_pred, weights=(1.0, 0, 0, 0))
                 g_f1 = sentence_bleu([gold], e_pred, weights=(1.0, 0, 0, 0))
                 f1_list[path][batch_id] += f1
@@ -434,7 +436,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
     parser.add_argument("--data_file", type=str, default="data/1113data/hotpot_train_shuffle.json")
-    parser.add_argument("--lora_path", type=str, default="/hdd/rbqlsquf/1111_1107_yesloss_concat/checkpoint-6000")
+    parser.add_argument("--lora_path", type=str, default="model/1115_yesloss_final/checkpoint-2200")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
     parser.add_argument("--new_model", type=str, default="new_model")
@@ -442,9 +444,9 @@ if __name__ == "__main__":
     parser.add_argument("--wandb_run_name", type=str, default="test")
     parser.add_argument("--output_dir", type=str, default="qwen_lora_1026")
     parser.add_argument("--num_train_epochs", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=2)
+    parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--data_sample", type=bool, default=False)
+    parser.add_argument("--data_sample", type=bool, default=True)
     args = parser.parse_args()
     print(args)
     #########################################################
@@ -456,8 +458,8 @@ if __name__ == "__main__":
     config.beam_size = args.beam_size
     config.max_dec_len = args.max_dec_len
 
-    tokenizer, model = create_model(model_path, config)
-    # tokenizer, model = create_model_for_debug(model_path, args.lora_path, config)
+    # tokenizer, model = create_model(model_path, config)
+    tokenizer, model = create_model_for_debug(model_path, args.lora_path, config)
     data_file = args.data_file
     print("학습 데이터 : ", data_file)
     dataset = Dataset.from_json(data_file)
