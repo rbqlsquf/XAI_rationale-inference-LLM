@@ -6,11 +6,11 @@ OUTPUT_DIR="$BASE_DIR/result"
 SOURCE_DIR="$BASE_DIR/source"
 
 
-$PYTHON_PATH $SOURCE_DIR/train_upper.py \
-    --new_model 1114_upper \
-    --output_dir model/1114_upper \
+$PYTHON_PATH $SOURCE_DIR/train_pn_yesloss_1108.py \
+    --new_model 1115_data_2 \
+    --output_dir model/1115_data_2 \
     --num_train_epochs 1 \
     --batch_size 4 \
     --beam_size 1 \
     --gradient_accumulation_steps 1 \
-    --wandb_run_name 1114_upper
+    --wandb_run_name 1115_data_2

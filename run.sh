@@ -6,7 +6,7 @@ OUTPUT_DIR="$BASE_DIR/result/1115_yesloss_final"
 SOURCE_DIR="$BASE_DIR/source"
 SCRIPT_NAME="inference_1108.py"
 
-for i in {16..2..-2}; do
+for i in {22..2..-2}; do
     checkpoint=$((i * 100))
     $PYTHON_PATH $SOURCE_DIR/$SCRIPT_NAME \
         --train_model_path "$MODEL_DIR/checkpoint-$checkpoint" \

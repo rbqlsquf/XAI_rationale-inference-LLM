@@ -87,8 +87,10 @@ class CustomTrainer(Trainer):
                     tmp_sentence_mask = tmp_sentence_mask + [j + 1] * len(
                         (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
                     )
-                tmp_input_ids = tmp_input_ids + tokenizer.encode("<|im_end|>\n")
-                tmp_sentence_mask = tmp_sentence_mask + [0] * 2
+                tmp_input_ids = tmp_input_ids + tokenizer.encode(
+                    " <|im_end|>\n"
+                )  # 원래도 데이터에 문장 뒤에 띄어쓰기 있어서 한번 해봄
+                tmp_sentence_mask = tmp_sentence_mask + [0] * 3
                 ignore_padding_index = (inputs["labels"][k] == -100).nonzero(as_tuple=True)[0]
                 tmp_labels = [IGNORE_INDEX] * (len(tmp_input_ids))  # 엔터랑 eos까지 더해주기
                 if ignore_padding_index.numel() > 0:
@@ -310,13 +312,13 @@ class CustomTrainer(Trainer):
             and torch.mean(evidence_nll).item() < 1000
             and not torch.any(torch.isnan(evidence_nll))
         ):
-            loss = loss + 0.1 * evidence_nll
+            loss = loss + 0.3 * evidence_nll
         if (
             torch.mean(g_evidence_nll).item() != 0
             and torch.mean(g_evidence_nll).item() < 1000
             and not torch.any(torch.isnan(g_evidence_nll))
         ):
-            loss = loss + 0.1 * g_evidence_nll
+            loss = loss + 0.3 * g_evidence_nll
 
         r_loss = loss[best_path, column_indices].mean()
         print("========================================")
@@ -432,8 +434,8 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--data_file", type=str, default="data/1113data/hotpot_train_shuffle.json")
-    parser.add_argument("--lora_path", type=str, default="model/1115_yesloss_final/checkpoint-2200")
+    parser.add_argument("--data_file", type=str, default="data/1113data/train_data_1115.json")
+    parser.add_argument("--lora_path", type=str, default="model/1115_yesloss_final/checkpoint-1800")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
     parser.add_argument("--new_model", type=str, default="new_model")
@@ -443,7 +445,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--data_sample", type=bool, default=True)
+    parser.add_argument("--data_sample", type=bool, default=False)
     args = parser.parse_args()
     print(args)
     #########################################################
@@ -455,8 +457,8 @@ if __name__ == "__main__":
     config.beam_size = args.beam_size
     config.max_dec_len = args.max_dec_len
 
-    # tokenizer, model = create_model(model_path, config)
-    tokenizer, model = create_model_for_debug(model_path, args.lora_path, config)
+    tokenizer, model = create_model(model_path, config)
+    # tokenizer, model = create_model_for_debug(model_path, args.lora_path, config)
     data_file = args.data_file
     print("학습 데이터 : ", data_file)
     dataset = Dataset.from_json(data_file)
