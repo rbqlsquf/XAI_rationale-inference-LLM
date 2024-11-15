@@ -64,8 +64,8 @@ file_path = "data/1029data/hotpot_dev_supporting.json"
 with open(file_path, "r", encoding="utf-8") as f:
     dev_data = json.load(f)
 
-for i in range(64, 66, 2):
-    f_name = f"result/1111_1107_yesloss_concat/{i}00.json"
+for i in range(9, 11):
+    f_name = f"result/1106_weighted_rationale+noloss/hotpot_tt_{i}000.json"
 
     with open(f_name, "r", encoding="utf-8") as file:
         test_data = json.load(file)
@@ -81,11 +81,7 @@ for i in range(64, 66, 2):
         assert dev["_id"] == data["_id"]
         predict = ""
         answer = (
-            data["answer"]
-            .replace("**Answer:", "")
-            .replace("<|im_start|>assistant", "")
-            .replace("<|im_end|>", "")
-            .strip()
+            data["answer"].split("**Summary:")[0].replace("**Answer:", "").replace("<|im_start|>assistant", "").strip()
         )
         generated_text = data["generated_text"].split("**Summary:")[0].replace("**Answer:", "").strip()
         if answer == "yes":
@@ -100,9 +96,6 @@ for i in range(64, 66, 2):
                 generated_text = ""
         answer = answer.strip()
         predict = generated_text.strip()
-        # print(answer)
-        # print(generated_text)
-        # print("----")
         result_f1.append(f1_score_hotpot(answer, predict))
         result_em.append(exact_match_score(predict, answer))
         ################################################

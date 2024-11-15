@@ -33,6 +33,7 @@ class CustomDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
             max_length = max(len(mask) for mask in sentence_masks)
             padded_sentence_masks = [[0] * (max_length - len(mask)) + mask for mask in sentence_masks]
             batch["sent_masks"] = torch.tensor(padded_sentence_masks)
+
         return batch
 
 
@@ -64,7 +65,6 @@ class CustomTrainer(Trainer):
             #           근거 문장에 따른 입력 재구성
             #####################################################
             sample_inputs = []
-            real_input_len = []
             for k in range(r_batch_size):
                 target_value = tokenizer.encode("<|im_start|>")[0]
                 # target_value_2 = tokenizer.encode("<|im_end|>")[0]
@@ -93,7 +93,6 @@ class CustomTrainer(Trainer):
                 tmp_sentence_mask = tmp_sentence_mask + [0] * 2
                 ignore_padding_index = (inputs["labels"][k] == -100).nonzero(as_tuple=True)[0]
                 tmp_labels = [IGNORE_INDEX] * (len(tmp_input_ids))  # 엔터랑 eos까지 더해주기
-                real_input_len.append(len(tmp_input_ids))
                 if ignore_padding_index.numel() > 0:
                     tmp_input_ids = tmp_input_ids + inputs["labels"][k][ignore_padding_index[-1] + 1 :].tolist()
                     tmp_labels = tmp_labels + inputs["labels"][k][ignore_padding_index[-1] + 1 :].tolist()
@@ -143,10 +142,9 @@ class CustomTrainer(Trainer):
             argmax_e_logits = torch.argmax(e_logits, dim=-1)
 
             e_decoded_outputs = [
-                tokenizer.decode(output[real_input_len[i] :], skip_special_tokens=True)
+                tokenizer.decode(output[batch["labels"][i] != -100], skip_special_tokens=True)
                 for i, output in enumerate(argmax_e_logits)
             ]
-
             #####################################################
             #           근거 문장만 입력으로 했을 때 출력 친구들 넣어주기
             #####################################################
@@ -435,18 +433,18 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--data_file", type=str, default="data/1112data/hotpot_train_shuffle.json")
-    parser.add_argument("--lora_path", type=str, default="model/1112_yesloss/checkpoint-1000")
+    parser.add_argument("--data_file", type=str, default="data/1113data/hotpot_train_shuffle.json")
+    parser.add_argument("--lora_path", type=str, default="/hdd/rbqlsquf/1111_1107_yesloss_concat/checkpoint-6000")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
-    parser.add_argument("--new_model", type=str, default="new_mode")
+    parser.add_argument("--new_model", type=str, default="new_model")
     parser.add_argument("--wandb_project", type=str, default="llm pointer network")
     parser.add_argument("--wandb_run_name", type=str, default="test")
     parser.add_argument("--output_dir", type=str, default="qwen_lora_1026")
-    parser.add_argument("--num_train_epochs", type=int, default=2)
+    parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--data_sample", type=bool, default=True)
+    parser.add_argument("--data_sample", type=bool, default=False)
     args = parser.parse_args()
     print(args)
     #########################################################
@@ -464,7 +462,7 @@ if __name__ == "__main__":
     print("학습 데이터 : ", data_file)
     dataset = Dataset.from_json(data_file)
     if args.data_sample:
-        dataset = dataset.select(range(100))
+        dataset = dataset.select(range(10))
     processed_dataset = dataset.map(lambda example: process_func(example, tokenizer))
 
     new_model = args.new_model

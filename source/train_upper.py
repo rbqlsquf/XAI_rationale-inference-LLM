@@ -94,12 +94,15 @@ class CustomTrainer(Trainer):
         sampled_evidence_sentence = outputs.get("evidence_sentences")
 
         ###############
-        loss_fct_2 = CrossEntropyLoss()
-        loss_2 = loss_fct_2(
-            sampled_evidence_scores.view(-1, sampled_evidence_scores.size(-1)), inputs["gold_sp"].view(-1)
-        )
 
-        r_loss = (loss[0, :].mean() + loss_2) / 2
+        loss_fct_2 = CrossEntropyLoss()
+        try:
+            loss_2 = loss_fct_2(
+                sampled_evidence_scores.view(-1, sampled_evidence_scores.size(-1)), inputs["gold_sp"].view(-1)
+            )
+            r_loss = (loss[0, :].mean() + loss_2) / 2
+        except:
+            r_loss = loss[0, :].mean()
         print("========================================")
         print(self.state.global_step)
         print("loss:{}".format(loss))
@@ -203,7 +206,7 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--data_file", type=str, default="data/1113data/hotpot_train.json")
+    parser.add_argument("--data_file", type=str, default="data/1113data/hotpot_train_shuffle.json")
     parser.add_argument("--lora_path", type=str, default="model/1112_yesloss/checkpoint-1000")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)

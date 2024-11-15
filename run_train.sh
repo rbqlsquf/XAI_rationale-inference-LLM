@@ -7,10 +7,10 @@ SOURCE_DIR="$BASE_DIR/source"
 
 
 $PYTHON_PATH $SOURCE_DIR/train_upper.py \
-    --new_model 1113_upper \
-    --output_dir model/1113_upper \
+    --new_model 1114_upper \
+    --output_dir model/1114_upper \
     --num_train_epochs 1 \
     --batch_size 4 \
     --beam_size 1 \
     --gradient_accumulation_steps 1 \
-    --wandb_run_name 1113_upper
+    --wandb_run_name 1114_upper
