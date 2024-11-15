@@ -81,15 +81,12 @@ class CustomTrainer(Trainer):
                 #       see_tokens는 근거 문장 자체로 정의
                 ################################################################
                 tmp_input_ids = sentences
-                for m in range(5):
-                    for j in range(config.max_dec_len):
-                        see_tokens = (
-                            (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
-                        )
-                        tmp_input_ids = tmp_input_ids + (inputs["input_ids"][k][see_tokens].tolist())
-                        tmp_sentence_mask = tmp_sentence_mask + [j + m * config.max_dec_len + 1] * len(
-                            (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
-                        )
+                for j in range(config.max_dec_len):
+                    see_tokens = (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
+                    tmp_input_ids = tmp_input_ids + (inputs["input_ids"][k][see_tokens].tolist())
+                    tmp_sentence_mask = tmp_sentence_mask + [j + 1] * len(
+                        (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
+                    )
                 tmp_input_ids = tmp_input_ids + tokenizer.encode("<|im_end|>\n")
                 tmp_sentence_mask = tmp_sentence_mask + [0] * 2
                 ignore_padding_index = (inputs["labels"][k] == -100).nonzero(as_tuple=True)[0]
