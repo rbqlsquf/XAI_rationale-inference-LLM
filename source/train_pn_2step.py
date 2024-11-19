@@ -80,16 +80,16 @@ class CustomTrainer(Trainer):
                 ################################################################
                 #       see_tokens는 근거 문장 자체로 정의
                 ################################################################
+                tmp_input_ids = sentences
                 for j in range(config.max_dec_len):
-                    see_tokens.extend(
-                        (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
-                    )
+                    see_tokens = (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
+                    tmp_input_ids = tmp_input_ids + (inputs["input_ids"][k][see_tokens].tolist())
                     tmp_sentence_mask = tmp_sentence_mask + [j + 1] * len(
                         (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
                     )
-                tmp_input_ids = (
-                    sentences + inputs["input_ids"][k][see_tokens].tolist() + tokenizer.encode("<|im_end|>\n")
-                )
+                tmp_input_ids = tmp_input_ids + tokenizer.encode(
+                    "<|im_end|>\n"
+                )  # 원래도 데이터에 문장 뒤에 띄어쓰기 있어서 한번 해봄
                 tmp_sentence_mask = tmp_sentence_mask + [0] * 2
                 ignore_padding_index = (inputs["labels"][k] == -100).nonzero(as_tuple=True)[0]
                 tmp_labels = [IGNORE_INDEX] * (len(tmp_input_ids))  # 엔터랑 eos까지 더해주기
@@ -165,9 +165,12 @@ class CustomTrainer(Trainer):
             e_predicted = evidence_predicted_answer[path]
             # batch 단위로 나옴
             for batch_id, (pred_, e_pred_) in enumerate(zip(predicted, e_predicted)):
-                e_pred = e_pred_.replace("assistant\n**Answer:", "").lower().split(" ")
-                pred = pred_.replace("assistant\n**Answer:", "").lower().split(" ")
-                gold = gold_list[batch_id].replace("assistant\n**Answer:", "").lower().split(" ")
+                e_pred = e_pred_.replace("assistant\n**Answer:", "").strip().lower().split(" ")
+                if "Answer:" in pred_:
+                    pred = pred_[pred_.index("Answer:") + len("Answer:") :].strip().lower().split(" ")
+                else:
+                    pred = pred_.replace("assistant\n**Answer:", "").lower().split(" ")
+                gold = gold_list[batch_id].replace("assistant\n**Answer:", "").strip().lower().split(" ")
                 f1 = sentence_bleu([pred], e_pred, weights=(1.0, 0, 0, 0))
                 g_f1 = sentence_bleu([gold], e_pred, weights=(1.0, 0, 0, 0))
                 f1_list[path][batch_id] += f1
@@ -279,66 +282,78 @@ class CustomTrainer(Trainer):
             # We don't use .loss here since the model may return tuples instead of ModelOutput.
             loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]  # path, batch , 1742(max_sent)
 
-        sampled_evidence_scores = outputs.get("attention_scores")  # batch*path, 2, max_sent??
-        mask = outputs.get("mask")  # batch, dec_len, max_sent
-        path_logits = outputs.get("path_logits")  # path, batch, max_len, 151667
-        sampled_evidence_sentence = outputs.get("evidence_sentences")
+        if self.state.global_step >= self.state.max_steps * self.args.warmup_ratio:
+            # sampled_evidence_scores : [batch, evi_sent, max_sent]
+            sampled_evidence_scores = outputs.get("attention_scores")  # batch*path, 2, max_sent??
+            mask = outputs.get("mask")  # batch, dec_len, max_sent
+            path_logits = outputs.get("path_logits")  # path, batch, max_len, 151667
+            sampled_evidence_sentence = outputs.get("evidence_sentences")
+
+            #####################################################################
+            #               형태 바꾸기
+            #####################################################################
+            r_batch_size = mask.size(0)
+            # sampled_evidence_scores : [batch*beam_size, max_dec_len, max_sent] -> [batch, beam_size, max_dec_len, max_sent]
+            sampled_evidence_scores = sampled_evidence_scores.view(
+                r_batch_size, config.beam_size, config.max_dec_len, -1
+            )
+            #####################################################################
+            #              먼저 답변 부터 생성
+            #####################################################################
+            # path, batch
+            predicted_answer, evidence_predicted_answer = self.generate_sentences(
+                model, inputs, r_batch_size, path_logits, sampled_evidence_sentence
+            )
+
+            best_path, f1_list, g_f1_list = self.compute_evidence_f1_score(
+                predicted_answer, evidence_predicted_answer, inputs, r_batch_size
+            )
+
+            evidence_nll, g_evidence_nll = self.compute_evidence_loss(
+                r_batch_size, f1_list, g_f1_list, sampled_evidence_scores, sampled_evidence_sentence, mask
+            )
+            column_indices = torch.arange(r_batch_size, device="cuda")
+            if (
+                torch.mean(evidence_nll).item() != 0
+                and torch.mean(evidence_nll).item() < 1000
+                and not torch.any(torch.isnan(evidence_nll))
+            ):
+                loss = loss + 0.3 * evidence_nll
+            if (
+                torch.mean(g_evidence_nll).item() != 0
+                and torch.mean(g_evidence_nll).item() < 1000
+                and not torch.any(torch.isnan(g_evidence_nll))
+            ):
+                loss = loss + 0.3 * g_evidence_nll
 
         #####################################################################
-        #               형태 바꾸기
+        #               beamsearch 없으니까 그냥 0으로 설정
         #####################################################################
-        r_batch_size = mask.size(0)
-        # sampled_evidence_scores : [batch*beam_size, max_dec_len, max_sent] -> [batch, beam_size, max_dec_len, max_sent]
-        sampled_evidence_scores = sampled_evidence_scores.view(r_batch_size, config.beam_size, config.max_dec_len, -1)
-        #####################################################################
-        #              먼저 답변 부터 생성
-        #####################################################################
-        # path, batch
-        predicted_answer, evidence_predicted_answer = self.generate_sentences(
-            model, inputs, r_batch_size, path_logits, sampled_evidence_sentence
-        )
+        # r_loss = loss[best_path, column_indices].mean()
+        r_loss = loss[0].mean()
 
-        best_path, f1_list, g_f1_list = self.compute_evidence_f1_score(
-            predicted_answer, evidence_predicted_answer, inputs, r_batch_size
-        )
-
-        evidence_nll, g_evidence_nll = self.compute_evidence_loss(
-            r_batch_size, f1_list, g_f1_list, sampled_evidence_scores, sampled_evidence_sentence, mask
-        )
-        column_indices = torch.arange(r_batch_size, device="cuda")
-        if (
-            torch.mean(evidence_nll).item() != 0
-            and torch.mean(evidence_nll).item() < 1000
-            and not torch.any(torch.isnan(evidence_nll))
-        ):
-            loss = loss + 0.1 * evidence_nll
-        if (
-            torch.mean(g_evidence_nll).item() != 0
-            and torch.mean(g_evidence_nll).item() < 1000
-            and not torch.any(torch.isnan(g_evidence_nll))
-        ):
-            loss = loss + 0.1 * g_evidence_nll
-
-        r_loss = loss[best_path, column_indices].mean()
         print("========================================")
         print(self.state.global_step)
         print("loss:{}".format(loss))
-        print("best_path : {}".format(best_path))
-        print("r_loss : {}, evidence_nll : {}, g_evidence_nll : {}".format(r_loss, evidence_nll, g_evidence_nll))
-        # Add wandb logging for the evidence losses
-        # Detailed wandb logging
-        wandb.log(
-            {
-                "losses/evidence_nll": torch.mean(evidence_nll).item(),
-                "losses/g_evidence_nll": torch.mean(g_evidence_nll).item(),
-                "losses/total_loss": loss.mean().item(),
-                "losses/r_loss": r_loss.item(),
-                # "path/best_path": best_path.float().mean().item(),
-                "metrics/f1_scores": torch.mean(f1_list).item(),
-                "metrics/g_f1_scores": torch.mean(g_f1_list).item(),
-            },
-            step=self.state.global_step,
-        )
+        if self.state.global_step >= self.state.max_steps * self.args.warmup_ratio:
+            print("best_path : {}".format(best_path))
+            print("r_loss : {}, evidence_nll : {}, g_evidence_nll : {}".format(r_loss, evidence_nll, g_evidence_nll))
+            # Add wandb logging for the evidence losses
+            # Detailed wandb logging
+            wandb.log(
+                {
+                    "losses/evidence_nll": torch.mean(evidence_nll).item(),
+                    "losses/g_evidence_nll": torch.mean(g_evidence_nll).item(),
+                    "losses/r_loss": r_loss.item(),
+                    "path/best_path": best_path.float().mean().item(),
+                    "metrics/f1_scores": torch.mean(f1_list).item(),
+                    "metrics/g_f1_scores": torch.mean(g_f1_list).item(),
+                },
+                step=self.state.global_step,
+            )
+        else:
+            print("r_loss : {}".format(r_loss))
+
         return (r_loss, outputs) if return_outputs else r_loss
 
 
@@ -433,8 +448,8 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--data_file", type=str, default="data/1113data/hotpot_train_shuffle.json")
-    parser.add_argument("--lora_path", type=str, default="/hdd/rbqlsquf/1115_yesloss_final/checkpoint-15000")
+    parser.add_argument("--data_file", type=str, default="data/1113data/train_data_1115.json")
+    parser.add_argument("--lora_path", type=str, default="model/1115_yesloss_final/checkpoint-1800")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
     parser.add_argument("--new_model", type=str, default="new_model")
@@ -442,9 +457,9 @@ if __name__ == "__main__":
     parser.add_argument("--wandb_run_name", type=str, default="test")
     parser.add_argument("--output_dir", type=str, default="qwen_lora_1026")
     parser.add_argument("--num_train_epochs", type=int, default=1)
-    parser.add_argument("--batch_size", type=int, default=2)
+    parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--data_sample", type=bool, default=True)
+    parser.add_argument("--data_sample", type=bool, default=False)
     args = parser.parse_args()
     print(args)
     #########################################################
@@ -456,8 +471,8 @@ if __name__ == "__main__":
     config.beam_size = args.beam_size
     config.max_dec_len = args.max_dec_len
 
-    # tokenizer, model = create_model(model_path, config)
-    tokenizer, model = create_model_for_debug(model_path, args.lora_path, config)
+    tokenizer, model = create_model(model_path, config)
+    # tokenizer, model = create_model_for_debug(model_path, args.lora_path, config)
     data_file = args.data_file
     print("학습 데이터 : ", data_file)
     dataset = Dataset.from_json(data_file)

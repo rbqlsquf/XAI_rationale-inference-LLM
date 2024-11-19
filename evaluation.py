@@ -60,12 +60,12 @@ def evaluate_supporting_facts(gold_sp, pred_sp):
 
 import json
 
-file_path = "data/1029data/hotpot_dev_supporting.json"
+file_path = "data/1113data/hotpot_dev.json"
 with open(file_path, "r", encoding="utf-8") as f:
     dev_data = json.load(f)
 
-for i in range(20, 24, 2):
-    f_name = f"result/1115_yesloss_final/{i}00.json"
+for i in range(54, 55, 2):
+    f_name = f"result/1114_upper/{i}00-upper.json"
 
     with open(f_name, "r", encoding="utf-8") as file:
         test_data = json.load(file)
@@ -135,3 +135,4 @@ for i in range(20, 24, 2):
     print("all_precision_score 점수: ", sum(all_precision_score) / len(all_precision_score))
     print("all_recall_score 점수: ", sum(all_recall_score) / len(all_recall_score))
     print("=================================================")
+    print(len(result_em))

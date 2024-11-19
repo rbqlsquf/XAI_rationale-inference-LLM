@@ -101,6 +101,7 @@ def generate_batch_answer(batches, tokenizer, model):
         sentence_masks = [item.sent_masks for item in batch]
 
         model.to("cuda")
+        model.eval()
         input_batch = {}
         max_length = max(len(mask) for mask in input_ids)
         padded_input_ids = [[tokenizer.pad_token_id] * (max_length - len(mask)) + mask for mask in input_ids]
@@ -166,12 +167,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--base_model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
     parser.add_argument("--train_model_path", type=str, default="model/1115_yesloss_final/checkpoint-2000")
-    parser.add_argument("--data_file", type=str, default="data/1029data/hotpot_dev_supporting.json")
+    parser.add_argument("--data_file", type=str, default="data/1113data/hotpot_dev.json")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
     parser.add_argument("--output_dir", type=str, default="result/1115_yesloss_final/2000.json")
-    parser.add_argument("--batch_size", type=int, default=8)
-    parser.add_argument("--data_sample", type=bool, default=True)
+    parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--data_sample", type=bool, default=False)
 
     args = parser.parse_args()
     print(args)

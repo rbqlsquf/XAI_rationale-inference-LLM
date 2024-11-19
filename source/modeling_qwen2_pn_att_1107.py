@@ -27,19 +27,18 @@ from dataclasses import dataclass
 from torch.nn import functional as F
 import os
 
+
 class BeamSearchAttentionDecoder(nn.Module):
     def __init__(self, hidden_size, num_sent, topk=1):
         super(BeamSearchAttentionDecoder, self).__init__()
         self.hidden_size = hidden_size
         self.num_sent = num_sent
-        
 
         self.decoder = nn.GRU(input_size=hidden_size, hidden_size=hidden_size, batch_first=True, num_layers=1)
 
         self.div_term = math.sqrt(hidden_size)
-        self.topk = topk #beam_size랑 동일, 인자로 첨부터 넘겨받긴함
+        self.topk = topk  # beam_size랑 동일, 인자로 첨부터 넘겨받긴함
 
-             
     def forward(
         self,
         last_hidden,
@@ -83,16 +82,17 @@ class BeamSearchAttentionDecoder(nn.Module):
         context = attn_alignment.bmm(value_encoder_outputs)
         # context : (batch*topk, 1, hidden)
 
-        #hidden_states = torch.cat([context, output], -1)
+        # hidden_states = torch.cat([context, output], -1)
         # result : [batch*topk, 1, hidden]
         # result = context # self.dense3(hidden_states)  # context와 output을 concat한 값
         tmp_list = []
         tmp_evi_sentence_index = attn_alignment.argmax(dim=-1)
         for batch_idx in range(batch_size):
             tmp_list.append(encoder_outputs[batch_idx, tmp_evi_sentence_index[batch_idx], :].squeeze(0))
-        
+
         evi_sent_representation = torch.stack(tmp_list)
         # evi_sent_representation = torch.stack([encoder_outputs[batch_idx, evidence_sentence_index[batch_idx], :]] for batch_idx in range(batch_size))
+        # evi_sent_representation : [batch, hidden] -> [batch, 1, hidden]
         result = evi_sent_representation.unsqueeze(1)
 
         ##################################################################
@@ -110,8 +110,8 @@ class BeamSearchAttentionDecoder(nn.Module):
         # sentences = torch.argmax(attn_alignment, -1)
         # scores = attn_alignment[:, :, torch.argmax(attn_alignment)]
         # evidence_scores : [batch,topk]
-        #encoder_outputs : [batch, sent_len, hidden]
-        
+        # encoder_outputs : [batch, sent_len, hidden]
+
         # 두번째 decoding step!
         if evidence_scores is not None:
             ####################################################################
@@ -194,8 +194,7 @@ class BeamSearchAttentionDecoder(nn.Module):
         # decoder_inputs, last_hidden, evidence_sentences, attention_scores, sent_attention_masks, evidence_scores,
         # evidence_scores : path 별 누적 점수 (beam search에서 상위 N개 뽑을때 사용)
         # attention_scores : 각 decoding step 별 문장 추출 logits
-        
-        
+
         return result, hidden, evidence_sentence_index, attention_scores, attention_mask, evidence_scores
 
 
@@ -210,27 +209,24 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         self.beam_size = config.beam_size
         self.linear_w1 = nn.Linear(in_features=config.hidden_size * 2, out_features=config.hidden_size)
         self.gru = None
-        
+
         self.max_dec_len = config.max_dec_len
         self.hidden_size = config.hidden_size
-        
+
         self.sentence_number = None
-        
+
     def set_gru(self, gru):
         self.gru = gru
-        
+
     def save_pn_model(self, model_path):
-        state_dict = {
-            'gru': self.gru.state_dict(),
-            'linear_w1': self.linear_w1.state_dict()
-        } 
+        state_dict = {"gru": self.gru.state_dict(), "linear_w1": self.linear_w1.state_dict()}
         torch.save(state_dict, os.path.join(model_path, "model.pt"))
 
     def load_pn_model(self, model_path):
         state_dict = torch.load(os.path.join(model_path, "model.pt"))
-        self.gru.load_state_dict(state_dict['gru'])
-        self.linear_w1.load_state_dict(state_dict['linear_w1'])
-    
+        self.gru.load_state_dict(state_dict["gru"])
+        self.linear_w1.load_state_dict(state_dict["linear_w1"])
+
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -382,13 +378,13 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
                 ########################################################################################
                 #   디코더 입력을 sentence_representation의 근거 문장 부분만으로 가지고 옴
                 ########################################################################################
-                #[batch, beam_size, hidden]
+                # [batch, beam_size, hidden]
                 reshape_decoder_inputs = decoder_inputs.view(-1, self.beam_size, self.hidden_size)
                 evidence_vectors.append(reshape_decoder_inputs)
 
             evidence_vector = torch.stack(evidence_vectors, 0).permute(2, 1, 3, 0)
             # (dec_len, batch, beam_size, hidden) => (beam_size, batch, hidden, dec_len)
-            
+
             evidence_sentences = torch.tensor(evidence_sentences, dtype=torch.long).cuda()
             self.evidence = evidence_vector
             attention_scores = attention_scores.squeeze(2).transpose(0, 1)
@@ -403,10 +399,12 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             # self.evidence : (batch, 1, hidden)
 
             #: (batch, max_length, 1)
-            cur_evidence = self.evidence[path] # (batch, hidden, dec_len)
+            cur_evidence = self.evidence[path]  # (batch, hidden, dec_len)
             d_k = hidden_states.size(2)
-            weight = F.softmax(hidden_states.bmm(cur_evidence) / math.sqrt(d_k), dim=-1) # (batch, max_length, dec_len)
-            weighted_evidence = weight.bmm(cur_evidence.transpose(1, 2)) # (batch, max_length, hidden)
+            weight = F.softmax(
+                hidden_states.bmm(cur_evidence) / math.sqrt(d_k), dim=-1
+            )  # (batch, max_length, dec_len)
+            weighted_evidence = weight.bmm(cur_evidence.transpose(1, 2))  # (batch, max_length, hidden)
             tmp_hidden_states = self.linear_w1(torch.cat([hidden_states, weighted_evidence], -1))
             #                   : (batch, max_length, hidden*2) -> (batch, max_length, hidden)
             # logits = self.lm_head(last_hidden)
