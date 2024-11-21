@@ -118,7 +118,7 @@ class CustomTrainer(Trainer):
             attention_mask = [f.get("attention_mask", None) for f in sample_inputs]
             sentence_masks = [f.get("sent_masks", None) for f in sample_inputs]
             labels = [f.get("labels", None) for f in sample_inputs]
-
+            sample = True
             max_length = max(len(mask) for mask in input_ids)
             batch = {}
 
@@ -137,6 +137,7 @@ class CustomTrainer(Trainer):
                 attention_mask=batch["attention_mask"],
                 sent_masks=batch["sent_masks"],
                 labels=batch["labels"],
+                sample=sample,
             )
             e_logits = e_outputs.get("logits")  # path, batch , 1742(max_sent)
             argmax_e_logits = torch.argmax(e_logits, dim=-1)
@@ -309,6 +310,14 @@ class CustomTrainer(Trainer):
             r_batch_size, f1_list, g_f1_list, sampled_evidence_scores, sampled_evidence_sentence, mask
         )
         column_indices = torch.arange(r_batch_size, device="cuda")
+        aa = []
+        for e in evidence_nll:
+            if False in [True if k.item() > 0 else False for k in e]:
+                aa.append(False)
+        if False in aa:
+            print(aa)
+            model.model.evidence = None
+            outputs = model(**inputs)
         if (
             torch.mean(evidence_nll).item() != 0
             and torch.mean(evidence_nll).item() < 1000
@@ -323,6 +332,16 @@ class CustomTrainer(Trainer):
             loss = loss + 0.1 * g_evidence_nll
 
         r_loss = loss[best_path, column_indices].mean()
+
+        if r_loss < 0:
+            for k in range(r_batch_size):
+                target_value = tokenizer.encode("<|im_start|>")[0]
+                # target_value_2 = tokenizer.encode("<|im_end|>")[0]
+                target_value_2 = tokenizer.encode("**Document:\n")[0]
+                im_start_index = (inputs["input_ids"][k] == target_value).nonzero(as_tuple=True)[0][0].item()
+                im_end_index = (inputs["input_ids"][k] == target_value_2).nonzero(as_tuple=True)[0][1].item()
+                sentences = inputs["input_ids"][k][im_start_index : im_end_index + 3]
+                print(tokenizer.decode(sentences))
         print("========================================")
         print(self.state.global_step)
         print("loss:{}".format(loss))
@@ -436,9 +455,10 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
+    # parser.add_argument("--data_file", type=str, default="data/1113data/train_data_1115.json")
     parser.add_argument("--data_file", type=str, default="data/1113data/hotpot_train_shuffle.json")
     parser.add_argument("--lora_path", type=str, default="/hdd/rbqlsquf/1115_yesloss_final/checkpoint-15000")
-    parser.add_argument("--beam_size", type=int, default=1)
+    parser.add_argument("--beam_size", type=int, default=5)
     parser.add_argument("--max_dec_len", type=int, default=3)
     parser.add_argument("--new_model", type=str, default="new_model")
     parser.add_argument("--wandb_project", type=str, default="llm pointer network")
@@ -459,8 +479,8 @@ if __name__ == "__main__":
     config.beam_size = args.beam_size
     config.max_dec_len = args.max_dec_len
 
-    # tokenizer, model = create_model(model_path, config)
-    tokenizer, model = create_model_for_debug(model_path, args.lora_path, config)
+    tokenizer, model = create_model(model_path, config)
+    # tokenizer, model = create_model_for_debug(model_path, args.lora_path, config)
     data_file = args.data_file
     print("학습 데이터 : ", data_file)
     dataset = Dataset.from_json(data_file)

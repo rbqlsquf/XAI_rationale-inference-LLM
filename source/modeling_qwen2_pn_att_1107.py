@@ -92,7 +92,6 @@ class BeamSearchAttentionDecoder(nn.Module):
 
         evi_sent_representation = torch.stack(tmp_list)
         # evi_sent_representation = torch.stack([encoder_outputs[batch_idx, evidence_sentence_index[batch_idx], :]] for batch_idx in range(batch_size))
-        # evi_sent_representation : [batch, hidden] -> [batch, 1, hidden]
         result = evi_sent_representation.unsqueeze(1)
 
         ##################################################################
@@ -102,15 +101,24 @@ class BeamSearchAttentionDecoder(nn.Module):
         tmp_hidden = []
         tmp_attention_mask = []
         tmp_attn_outputs = []
+        batch_attn_alignment = attn_alignment.view(batch_size // self.topk, -1, max_sent)
+        top_n_logit_indices = []
+        for real_batch in range(batch_size // self.topk):
+            top_n_logit_indices.append(batch_attn_alignment[real_batch].topk(k=self.topk, dim=-1, sorted=True))
+        # top_n_logit_indices = attn_alignment.topk(k=self.topk, dim=-1, sorted=True)
 
-        top_n_logit_indices = attn_alignment.topk(k=self.topk, dim=-1, sorted=True)
         # scores : [batch*topk, 1(topk)] , sentences : [batch*topk, 1]
-        scores = top_n_logit_indices.values.squeeze(1)
-        sentences = top_n_logit_indices.indices.squeeze(1)
+        scores = []
+        sentences = []
+        for top_n_logit_index in top_n_logit_indices:
+            scores.append(top_n_logit_index.values)
+            sentences.append(top_n_logit_index.indices)
         # sentences = torch.argmax(attn_alignment, -1)
         # scores = attn_alignment[:, :, torch.argmax(attn_alignment)]
         # evidence_scores : [batch,topk]
         # encoder_outputs : [batch, sent_len, hidden]
+        scores = torch.stack(scores).view(batch_size, -1)
+        sentences = torch.stack(sentences).view(batch_size, -1)
 
         # 두번째 decoding step!
         if evidence_scores is not None:
@@ -174,8 +182,13 @@ class BeamSearchAttentionDecoder(nn.Module):
             attn_outputs = torch.stack(tmp_attn_outputs, 0).view(batch_size, 1, -1)
 
         else:
-            evidence_scores = -torch.log(scores)[: batch_size // self.topk].reshape(-1)
-            evidence_sentences = sentences[: batch_size // self.topk].reshape(-1)
+            # evidence_scores = -torch.log(scores[: batch_size // self.topk]).reshape(-1)
+            # evidence_sentences = sentences[: batch_size // self.topk].reshape(-1)
+
+            # 인덱스 생성: 0, a, 2a, ...
+            row_indices = torch.arange(0, sentences.size(0), step=self.topk)
+            evidence_scores = -torch.log(scores[row_indices]).reshape(-1)
+            evidence_sentences = sentences[row_indices].reshape(-1)
             evidence_sentence_index = []
 
             # evidence_sentences : [batch1-1, batch1-2, batch1-3 ..., batch 4-3, batch 4-4]
@@ -241,6 +254,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         sent_masks: Optional[torch.Tensor] = None,
+        sample: Optional[bool] = False,
         **kwargs,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -248,7 +262,8 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
+        if sample:
+            self.gru.topk = 1
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
         outputs = self.model(
             input_ids=input_ids,
@@ -348,7 +363,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             #################################################
             # [batch, 1, hidden] -> [batch, topk, hidden]  -> [batch *topk, 1, hidden] -> 묶음으로 repeat됨 앞에 단위를 게속 반복하는 느낌
             decoder_inputs = decoder_inputs.repeat(1, self.beam_size, 1).view(-1, 1, self.hidden_size)
-            encoder_outputs = encoder_outputs.repeat(1, self.beam_size, 1, 1).view(-1, max_sent, self.hidden_size)
+            encoder_outputs = encoder_outputs.repeat(1, self.beam_size, 1).view(-1, max_sent, self.hidden_size)
             sent_attention_masks = sent_attention_masks.repeat(1, self.beam_size, 1).view(-1, 1, max_sent)
 
             evidence_scores = None
@@ -435,12 +450,13 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
                     # Enable model parallelism
                     shift_labels = shift_labels.to(shift_logits.device)
                     loss = loss_fct(shift_logits, shift_labels)
-
                     # 최종 loss 계산
                     label_losses.append(loss)
             label_losses = torch.stack(label_losses, 0)
-            span_loss = label_losses.view(-1, batch_size)
 
+            span_loss = label_losses.view(-1, batch_size)
+        if sample:
+            self.gru.topk = self.beam_size
         if not return_dict:
             output = (all_path_logits[0],) + outputs[1:]
             return (span_loss,) + output if span_loss is not None else output
