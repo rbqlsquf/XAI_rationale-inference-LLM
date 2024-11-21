@@ -80,16 +80,16 @@ class CustomTrainer(Trainer):
                 ################################################################
                 #       see_tokens는 근거 문장 자체로 정의
                 ################################################################
+                tmp_input_ids = sentences
                 for j in range(config.max_dec_len):
-                    see_tokens.extend(
-                        (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
-                    )
+                    see_tokens = (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
+                    tmp_input_ids = tmp_input_ids + (inputs["input_ids"][k][see_tokens].tolist())
                     tmp_sentence_mask = tmp_sentence_mask + [j + 1] * len(
                         (inputs["sent_masks"][k] == evidence_path[k][j]).nonzero(as_tuple=True)[0].tolist()
                     )
-                tmp_input_ids = (
-                    sentences + inputs["input_ids"][k][see_tokens].tolist() + tokenizer.encode("<|im_end|>\n")
-                )
+                tmp_input_ids = tmp_input_ids + tokenizer.encode(
+                    "<|im_end|>\n"
+                )  # 원래도 데이터에 문장 뒤에 띄어쓰기 있어서 한번 해봄
                 tmp_sentence_mask = tmp_sentence_mask + [0] * 2
                 ignore_padding_index = (inputs["labels"][k] == -100).nonzero(as_tuple=True)[0]
                 tmp_labels = [IGNORE_INDEX] * (len(tmp_input_ids))  # 엔터랑 eos까지 더해주기
@@ -165,9 +165,12 @@ class CustomTrainer(Trainer):
             e_predicted = evidence_predicted_answer[path]
             # batch 단위로 나옴
             for batch_id, (pred_, e_pred_) in enumerate(zip(predicted, e_predicted)):
-                e_pred = e_pred_.replace("assistant\n**Answer:", "").lower().split(" ")
-                pred = pred_.replace("assistant\n**Answer:", "").lower().split(" ")
-                gold = gold_list[batch_id].replace("assistant\n**Answer:", "").lower().split(" ")
+                e_pred = e_pred_.replace("assistant\n**Answer:", "").strip().lower().split(" ")
+                if "Answer:" in pred_:
+                    pred = pred_[pred_.index("Answer:") + len("Answer:") :].strip().lower().split(" ")
+                else:
+                    pred = pred_.replace("assistant\n**Answer:", "").lower().split(" ")
+                gold = gold_list[batch_id].replace("assistant\n**Answer:", "").strip().lower().split(" ")
                 f1 = sentence_bleu([pred], e_pred, weights=(1.0, 0, 0, 0))
                 g_f1 = sentence_bleu([gold], e_pred, weights=(1.0, 0, 0, 0))
                 f1_list[path][batch_id] += f1
@@ -444,7 +447,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--data_sample", type=bool, default=True)
+    parser.add_argument("--data_sample", type=bool, default=False)
     args = parser.parse_args()
     print(args)
     #########################################################
