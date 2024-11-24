@@ -101,14 +101,20 @@ class CustomTrainer(Trainer):
                 sampled_evidence_scores.view(-1, sampled_evidence_scores.size(-1)), inputs["gold_sp"].view(-1)
             )
             r_loss = (loss[0, :].mean() + loss_2) / 2
+            print("========================================")
+            print(self.state.global_step)
+            print("loss:{}".format(loss))
+            print("loss_mean:{}".format(loss[0, :].mean()))
+            print("loss_2:{}".format(loss_2))
+            print("r_loss : {}".format(r_loss))
         except:
             r_loss = loss[0, :].mean()
-        print("========================================")
-        print(self.state.global_step)
-        print("loss:{}".format(loss))
-        print("loss_mean:{}".format(loss[0, :].mean()))
-        print("loss_2:{}".format(loss_2))
-        print("r_loss : {}".format(r_loss))
+            print("========================================")
+            print(self.state.global_step)
+            print("loss:{}".format(loss))
+            print("loss_mean:{}".format(loss[0, :].mean()))
+            print("loss_2:nononono")
+            print("r_loss : {}".format(r_loss))
         # Add wandb logging for the evidence losses
         # Detailed wandb logging
         return (r_loss, outputs) if return_outputs else r_loss

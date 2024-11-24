@@ -39,6 +39,8 @@ class BeamSearchAttentionDecoder(nn.Module):
 
         self.div_term = math.sqrt(hidden_size)
         self.topk = topk  # beam_size랑 동일, 인자로 첨부터 넘겨받긴함
+        self.key_linear = nn.Linear(hidden_size, hidden_size)
+        self.value_linear = nn.Linear(hidden_size, hidden_size)
 
     def forward(
         self,
@@ -60,8 +62,8 @@ class BeamSearchAttentionDecoder(nn.Module):
         batch_size = decoder_inputs.size(0)
         max_sent = encoder_outputs.size(1)
         indexes = [e for e in range(batch_size)]
-        key_encoder_outputs = encoder_outputs
-        value_encoder_outputs = key_encoder_outputs
+        key_encoder_outputs = self.key_linear(encoder_outputs)
+        value_encoder_outputs = self.value_linear(encoder_outputs)
         # key_encoder_outputs = key_encoder_outputs + encoder_outputs
         # value_encoder_outputs = self.dense2(encoder_outputs)
         # value_encoder_outputs = value_encoder_outputs + encoder_outputs
@@ -102,15 +104,24 @@ class BeamSearchAttentionDecoder(nn.Module):
         tmp_hidden = []
         tmp_attention_mask = []
         tmp_attn_outputs = []
+        batch_attn_alignment = attn_alignment.view(batch_size // self.topk, -1, max_sent)
+        top_n_logit_indices = []
+        for real_batch in range(batch_size // self.topk):
+            top_n_logit_indices.append(batch_attn_alignment[real_batch].topk(k=self.topk, dim=-1, sorted=True))
+        # top_n_logit_indices = attn_alignment.topk(k=self.topk, dim=-1, sorted=True)
 
-        top_n_logit_indices = attn_alignment.topk(k=self.topk, dim=-1, sorted=True)
         # scores : [batch*topk, 1(topk)] , sentences : [batch*topk, 1]
-        scores = top_n_logit_indices.values.squeeze(1)
-        sentences = top_n_logit_indices.indices.squeeze(1)
+        scores = []
+        sentences = []
+        for top_n_logit_index in top_n_logit_indices:
+            scores.append(top_n_logit_index.values)
+            sentences.append(top_n_logit_index.indices)
         # sentences = torch.argmax(attn_alignment, -1)
         # scores = attn_alignment[:, :, torch.argmax(attn_alignment)]
         # evidence_scores : [batch,topk]
         # encoder_outputs : [batch, sent_len, hidden]
+        scores = torch.stack(scores).view(batch_size, -1)
+        sentences = torch.stack(sentences).view(batch_size, -1)
 
         # 두번째 decoding step!
         if evidence_scores is not None:
@@ -174,8 +185,13 @@ class BeamSearchAttentionDecoder(nn.Module):
             attn_outputs = torch.stack(tmp_attn_outputs, 0).view(batch_size, 1, -1)
 
         else:
-            evidence_scores = -torch.log(scores)[: batch_size // self.topk].reshape(-1)
-            evidence_sentences = sentences[: batch_size // self.topk].reshape(-1)
+            # evidence_scores = -torch.log(scores[: batch_size // self.topk]).reshape(-1)
+            # evidence_sentences = sentences[: batch_size // self.topk].reshape(-1)
+
+            # 인덱스 생성: 0, a, 2a, ...
+            row_indices = torch.arange(0, sentences.size(0), step=self.topk)
+            evidence_scores = -torch.log(scores[row_indices]).reshape(-1)
+            evidence_sentences = sentences[row_indices].reshape(-1)
             evidence_sentence_index = []
 
             # evidence_sentences : [batch1-1, batch1-2, batch1-3 ..., batch 4-3, batch 4-4]
@@ -186,7 +202,7 @@ class BeamSearchAttentionDecoder(nn.Module):
             attention_scores = attn_outputs.unsqueeze(0)
 
         # 근거 문장의 확률 낮춤
-        # attention_mask[indexes, 0, evidence_sentences] = -1e10
+        attention_mask[indexes, 0, evidence_sentences] = -1e10
         # evidence_scores : [batch, topk 여야함]
         # evidence_sentence_index : 리스트 각 batch마다 이제 근거 문장들이 들어갈 예정
         # attention_scores : [batch, 1, max_sent]
@@ -242,6 +258,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         sent_masks: Optional[torch.Tensor] = None,
+        gold_sp: Optional[torch.Tensor] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -302,7 +319,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             sent_attention_masks = sent_attention_masks.float()
 
             # 질문 부분을 무시하기 위함
-            # sent_attention_masks[:, 0] = 1
+            sent_attention_masks[:, 0] = 1
 
             # 신경써야할 부분 -> 문장들이 있는 경우(이 때 질문 instruction 부분 제외)
             # mm : [batch, max_sent]
@@ -349,7 +366,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             #################################################
             # [batch, 1, hidden] -> [batch, topk, hidden]  -> [batch *topk, 1, hidden] -> 묶음으로 repeat됨 앞에 단위를 게속 반복하는 느낌
             decoder_inputs = decoder_inputs.repeat(1, self.beam_size, 1).view(-1, 1, self.hidden_size)
-            encoder_outputs = encoder_outputs.repeat(1, self.beam_size, 1, 1).view(-1, max_sent, self.hidden_size)
+            encoder_outputs = encoder_outputs.repeat(1, self.beam_size, 1).view(-1, max_sent, self.hidden_size)
             sent_attention_masks = sent_attention_masks.repeat(1, self.beam_size, 1).view(-1, 1, max_sent)
 
             evidence_scores = None
@@ -410,7 +427,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             #                   : (batch, max_length, hidden*2) -> (batch, max_length, hidden)
             # logits = self.lm_head(last_hidden)
 
-            # tmp_hidden_states = hidden_states + self.evidence[:, path, :].unsqueeze(1)
+            tmp_hidden_states = hidden_states + weighted_evidence
             all_path_logits.append(self.lm_head(tmp_hidden_states).float())
 
         loss = None
