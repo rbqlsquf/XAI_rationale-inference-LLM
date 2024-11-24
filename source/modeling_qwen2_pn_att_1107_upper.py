@@ -26,6 +26,7 @@ from transformers import AutoTokenizer
 from dataclasses import dataclass
 from torch.nn import functional as F
 import os
+from modeling_qwen2_ import Qwen2Model
 
 
 class BeamSearchAttentionDecoder(nn.Module):
@@ -208,6 +209,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         self.beam_size = config.beam_size
         self.linear_w1 = nn.Linear(in_features=config.hidden_size * 2, out_features=config.hidden_size)
         self.gru = None
+        self.model = Qwen2Model(config)
 
         self.max_dec_len = config.max_dec_len
         self.hidden_size = config.hidden_size
@@ -240,7 +242,6 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         sent_masks: Optional[torch.Tensor] = None,
-        gold_sp: Optional[torch.Tensor] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -260,6 +261,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             cache_position=cache_position,
+            sent_masks=sent_masks,
         )
         tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-3B-Instruct")
         tokenizer.padding_side = "left"
