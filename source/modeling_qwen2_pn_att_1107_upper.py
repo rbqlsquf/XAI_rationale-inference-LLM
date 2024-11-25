@@ -202,7 +202,7 @@ class BeamSearchAttentionDecoder(nn.Module):
             attention_scores = attn_outputs.unsqueeze(0)
 
         # 근거 문장의 확률 낮춤
-        attention_mask[indexes, 0, evidence_sentences] = -1e10
+        # attention_mask[indexes, 0, evidence_sentences] = -1e10
         # evidence_scores : [batch, topk 여야함]
         # evidence_sentence_index : 리스트 각 batch마다 이제 근거 문장들이 들어갈 예정
         # attention_scores : [batch, 1, max_sent]
@@ -265,21 +265,35 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
-        outputs = self.model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-            past_key_values=past_key_values,
-            inputs_embeds=inputs_embeds,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-            cache_position=cache_position,
-            sent_masks=sent_masks,
-        )
+        if self.evidence is not None:
+            outputs = self.model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                past_key_values=past_key_values,
+                inputs_embeds=inputs_embeds,
+                use_cache=use_cache,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+                cache_position=cache_position,
+                sent_masks=None,
+            )
+        else:
+            outputs = self.model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                past_key_values=past_key_values,
+                inputs_embeds=inputs_embeds,
+                use_cache=use_cache,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+                cache_position=cache_position,
+                sent_masks=sent_masks,
+            )
         tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-3B-Instruct")
         tokenizer.padding_side = "left"
 
@@ -319,7 +333,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             sent_attention_masks = sent_attention_masks.float()
 
             # 질문 부분을 무시하기 위함
-            sent_attention_masks[:, 0] = 1
+            # sent_attention_masks[:, 0] = 1
 
             # 신경써야할 부분 -> 문장들이 있는 경우(이 때 질문 instruction 부분 제외)
             # mm : [batch, max_sent]

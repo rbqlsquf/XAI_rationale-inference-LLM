@@ -827,27 +827,29 @@ class Qwen2Model(Qwen2PreTrainedModel):
         if position_ids is None:
             position_ids = cache_position.unsqueeze(0)
 
-        # causal_mask = self._update_causal_mask(
-        #     attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
-        # )
-        #########################################################
-        #!!! 본인 위치 기준으로 뒤쪽 애들이 masking 되어있는거임
-        # casual mask를 -inf 를 값으로 갖는 [batch, 1, seq_len, seq_len] MASK 생성
-        # [batch, 1, seq_len, seq_len] => [0, 0, 0, 0, 1, 1, 1, 1, 1, 1]
-        #                                 [0, 0, 0, 0, 1, 1, 1, 1, 1, 1]
-        #                                 [0, 0, 0, 0, 1, 1, 1, 1, 1, 1]
-        #                                 [0, 0, 0, 0, 1, 1, 1, 1, 1, 1]
-        #                                 [1, 1, 1, 1, 0, 0, 0, 1, 1, 1]
-        #                                 [1, 1, 1, 1, 0, 0, 0, 1, 1, 1]
-        #                                 [1, 1, 1, 1, 0, 0, 0, 1, 1, 1]
-        #                                 [1, 1, 1, 1, 1, 1, 1, 0, 0, 0]
-        #                                 [1, 1, 1, 1, 1, 1, 1, 0, 0, 0]
-        #                                 [1, 1, 1, 1, 1, 1, 1, 0, 0, 0]
-        # torch.finfo(hidden_states.dtype).min
-        #########################################################
-        batch_size, seq_length = sent_masks.size()
-        sent_masks_expanded = sent_masks.unsqueeze(1).expand(batch_size, seq_length, seq_length)
-        causal_mask = (sent_masks_expanded != sent_masks_expanded.transpose(1, 2)).long().unsqueeze(1)
+        if sent_masks is None:
+            causal_mask = self._update_causal_mask(
+                attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
+            )
+        else:
+            #########################################################
+            #!!! 본인 위치 기준으로 뒤쪽 애들이 masking 되어있는거임
+            # casual mask를 -inf 를 값으로 갖는 [batch, 1, seq_len, seq_len] MASK 생성
+            # [batch, 1, seq_len, seq_len] => [0, 0, 0, 0, 1, 1, 1, 1, 1, 1]
+            #                                 [0, 0, 0, 0, 1, 1, 1, 1, 1, 1]
+            #                                 [0, 0, 0, 0, 1, 1, 1, 1, 1, 1]
+            #                                 [0, 0, 0, 0, 1, 1, 1, 1, 1, 1]
+            #                                 [1, 1, 1, 1, 0, 0, 0, 1, 1, 1]
+            #                                 [1, 1, 1, 1, 0, 0, 0, 1, 1, 1]
+            #                                 [1, 1, 1, 1, 0, 0, 0, 1, 1, 1]
+            #                                 [1, 1, 1, 1, 1, 1, 1, 0, 0, 0]
+            #                                 [1, 1, 1, 1, 1, 1, 1, 0, 0, 0]
+            #                                 [1, 1, 1, 1, 1, 1, 1, 0, 0, 0]
+            # torch.finfo(hidden_states.dtype).min
+            #########################################################
+            batch_size, seq_length = sent_masks.size()
+            sent_masks_expanded = sent_masks.unsqueeze(1).expand(batch_size, seq_length, seq_length)
+            causal_mask = (sent_masks_expanded != sent_masks_expanded.transpose(1, 2)).long().unsqueeze(1)
 
         hidden_states = inputs_embeds
 
