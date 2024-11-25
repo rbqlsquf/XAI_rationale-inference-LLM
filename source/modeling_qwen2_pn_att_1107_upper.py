@@ -293,6 +293,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
                 return_dict=return_dict,
                 cache_position=cache_position,
                 sent_masks=sent_masks,
+                labels=labels,
             )
         tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-3B-Instruct")
         tokenizer.padding_side = "left"

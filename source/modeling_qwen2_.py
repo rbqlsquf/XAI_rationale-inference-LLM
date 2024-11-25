@@ -786,6 +786,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         sent_masks: Optional[torch.Tensor] = None,
+        labels: Optional[torch.LongTensor] = None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -848,9 +849,38 @@ class Qwen2Model(Qwen2PreTrainedModel):
             # torch.finfo(hidden_states.dtype).min
             #########################################################
             batch_size, seq_length = sent_masks.size()
-            sent_masks_expanded = sent_masks.unsqueeze(1).expand(batch_size, seq_length, seq_length)
-            causal_mask = (sent_masks_expanded != sent_masks_expanded.transpose(1, 2)).long().unsqueeze(1)
+            # attention_mask가 1인 부분 추출
+            attention_mask_bool = attention_mask == 1  # 1인 부분은 True, 나머지는 False
+            # sent_masks에서 0인 부분 추출
+            sent_masks_zero = sent_masks == 0  # 0인 부분은 True, 나머지는 False
+            # 조건 결합: attention_mask가 1이고, sent_masks가 0인 부분
+            instruction_mask = attention_mask_bool & sent_masks_zero
 
+            # 조건을 만족하는 위치에 대해 sent_masks 값을 -1로 변경
+            sent_masks[instruction_mask] = -1  # type: ignore
+
+            sent_masks_expanded = sent_masks.unsqueeze(1).expand(batch_size, seq_length, seq_length)  # type: ignore
+            # attention_mask에서 0인 부분을 True로 설정
+            padding_mask_bool = attention_mask == 0  # 패딩 부분이 True
+
+            # padding_mask를 확장
+            padding_mask = padding_mask_bool.unsqueeze(1) | padding_mask_bool.unsqueeze(2)
+            # sent_masks에서 0인 구간을 추출
+
+            # attention_mask가 1인 (패딩이 아닌) 위치와 결합하여 label 위치 확인
+            label_mask = labels != -100  # -100이 아닌 부분만 True
+            label_mask = label_mask.unsqueeze(-1).expand(batch_size, seq_length, seq_length)
+
+            causal_mask = (sent_masks_expanded != sent_masks_expanded.transpose(1, 2)).long()
+            causal_mask[label_mask] = 0
+            #########################################################
+            # 패딩 부분은 1로 채워주기
+            #########################################################
+            causal_mask[padding_mask] = 1
+            causal_mask = causal_mask.unsqueeze(1)
+            causal_mask = causal_mask * torch.finfo(inputs_embeds.dtype).min
+
+            sent_masks[instruction_mask] = 0  # sent_mask 원상복귀
         hidden_states = inputs_embeds
 
         # decoder layers
