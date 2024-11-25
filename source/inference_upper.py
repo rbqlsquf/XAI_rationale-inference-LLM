@@ -101,6 +101,7 @@ def generate_batch_answer(batches, tokenizer, model):
         sentence_masks = [item.sent_masks for item in batch]
 
         model.to("cuda")
+        model.eval()
         input_batch = {}
         max_length = max(len(mask) for mask in input_ids)
         padded_input_ids = [[tokenizer.pad_token_id] * (max_length - len(mask)) + mask for mask in input_ids]
@@ -113,16 +114,19 @@ def generate_batch_answer(batches, tokenizer, model):
         with torch.no_grad():
             model.evidence = None
             model.sentence_number = None
-            outputs = model.generate(
+            outputs = model(
                 input_ids=input_batch["input_ids"],
                 attention_mask=input_batch["attention_mask"],
                 sent_masks=input_batch["sent_masks"],
                 max_new_tokens=50,
+                # temperature=0.0,
+                # do_sample=False,
             )
 
         input_text = [tokenizer.decode(input_id, skip_special_tokens=True) for i, input_id in enumerate(input_ids)]
         decoded_outputs = [
-            tokenizer.decode(output[len(input_text) :], skip_special_tokens=True) for i, output in enumerate(outputs)
+            tokenizer.decode(output[len(input_text[i]) :], skip_special_tokens=True)
+            for i, output in enumerate(outputs)
         ]
         decoded_outputs_ = [tokenizer.decode(output, skip_special_tokens=True) for i, output in enumerate(outputs)]
 
@@ -165,11 +169,11 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--base_model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--train_model_path", type=str, default="model/1113_upper/checkpoint-2600")
-    parser.add_argument("--data_file", type=str, default="data/1029data/hotpot_dev_supporting.json")
+    parser.add_argument("--train_model_path", type=str, default="model/1124_upper/checkpoint-4400")
+    parser.add_argument("--data_file", type=str, default="data/1125data/hotpot_train_shuffle_30k_shuffled.json")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
-    parser.add_argument("--output_dir", type=str, default="result/1113_upper/2600.json")
+    parser.add_argument("--output_dir", type=str, default="result/1124_upper/4400.json")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--data_sample", type=bool, default=True)
 

@@ -867,18 +867,23 @@ class Qwen2Model(Qwen2PreTrainedModel):
             padding_mask = padding_mask_bool.unsqueeze(1) | padding_mask_bool.unsqueeze(2)
             # sent_masks에서 0인 구간을 추출
 
-            # attention_mask가 1인 (패딩이 아닌) 위치와 결합하여 label 위치 확인
-            label_mask = labels != -100  # -100이 아닌 부분만 True
-            label_mask = label_mask.unsqueeze(-1).expand(batch_size, seq_length, seq_length)
-
-            causal_mask = (sent_masks_expanded != sent_masks_expanded.transpose(1, 2)).long()
-            causal_mask[label_mask] = 0
+            causal_mask = (sent_masks_expanded != sent_masks_expanded.transpose(1, 2)).float()
+            causal_mask[padding_mask] = 1
+            causal_mask = causal_mask * torch.finfo(inputs_embeds.dtype).min
+            if labels is not None:
+                # attention_mask가 1인 (패딩이 아닌) 위치와 결합하여 label 위치 확인
+                label_mask = labels != -100  # -100이 아닌 부분만 True
+                label_indices = label_mask.nonzero(as_tuple=True)
+                origin_causal_mask = self._update_causal_mask(
+                    attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
+                )
+                origin_causal_mask = origin_causal_mask.squeeze(1)
+                selected_causal_values = origin_causal_mask[label_indices[0], label_indices[1], :]
+                causal_mask[label_indices[0], label_indices[1], :] = selected_causal_values
             #########################################################
             # 패딩 부분은 1로 채워주기
             #########################################################
-            causal_mask[padding_mask] = 1
             causal_mask = causal_mask.unsqueeze(1)
-            causal_mask = causal_mask * torch.finfo(inputs_embeds.dtype).min
 
             sent_masks[instruction_mask] = 0  # sent_mask 원상복귀
         hidden_states = inputs_embeds

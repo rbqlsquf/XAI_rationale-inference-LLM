@@ -1,10 +1,10 @@
 PYTHON_PATH="/home/rbqlsquf2/workspace/XAI_rationale-inference-LLM/.venv/bin/python"
 
 BASE_DIR="/home/rbqlsquf2/workspace/XAI_rationale-inference-LLM"
-MODEL_DIR="model/1114_upper"
-OUTPUT_DIR="$BASE_DIR/result/1114_upper"
+MODEL_DIR="model/1124_upper"
+OUTPUT_DIR="$BASE_DIR/result/1124_upper"
 SOURCE_DIR="$BASE_DIR/source"
-SCRIPT_NAME="inference_1108.py"
+SCRIPT_NAME="inference_upper.py"
 
 # for i in {54..44..-2}; do
 #     checkpoint=$((i * 100))
@@ -21,7 +21,7 @@ SCRIPT_NAME="inference_1108.py"
 # done
 
 
-for i in 54; do
+for i in 10; do
     checkpoint=$((i * 100))
     $PYTHON_PATH $SOURCE_DIR/$SCRIPT_NAME \
         --train_model_path "$MODEL_DIR/checkpoint-$checkpoint" \
