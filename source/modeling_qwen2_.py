@@ -854,8 +854,11 @@ class Qwen2Model(Qwen2PreTrainedModel):
             # sent_masks에서 0인 부분 추출
             sent_masks_zero = sent_masks == 0  # 0인 부분은 True, 나머지는 False
             # 조건 결합: attention_mask가 1이고, sent_masks가 0인 부분
-            instruction_mask = attention_mask_bool & sent_masks_zero
-
+            if labels is not None:
+                label_mask = labels != -100  # -100이 아닌 부분만 True
+                instruction_mask = attention_mask_bool & sent_masks_zero & label_mask
+            else:
+                instruction_mask = attention_mask_bool & sent_masks_zero
             # 조건을 만족하는 위치에 대해 sent_masks 값을 -1로 변경
             sent_masks[instruction_mask] = -1  # type: ignore
 
@@ -872,7 +875,6 @@ class Qwen2Model(Qwen2PreTrainedModel):
             causal_mask = causal_mask * torch.finfo(inputs_embeds.dtype).min
             if labels is not None:
                 # attention_mask가 1인 (패딩이 아닌) 위치와 결합하여 label 위치 확인
-                label_mask = labels != -100  # -100이 아닌 부분만 True
                 label_indices = label_mask.nonzero(as_tuple=True)
                 origin_causal_mask = self._update_causal_mask(
                     attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
