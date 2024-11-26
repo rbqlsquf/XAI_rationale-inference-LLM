@@ -856,7 +856,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
             # 조건 결합: attention_mask가 1이고, sent_masks가 0인 부분
             if labels is not None:
                 label_mask = labels != -100  # -100이 아닌 부분만 True
-                instruction_mask = attention_mask_bool & sent_masks_zero & label_mask
+                instruction_mask = attention_mask_bool & sent_masks_zero & ~label_mask
             else:
                 instruction_mask = attention_mask_bool & sent_masks_zero
             # 조건을 만족하는 위치에 대해 sent_masks 값을 -1로 변경
@@ -873,15 +873,25 @@ class Qwen2Model(Qwen2PreTrainedModel):
             causal_mask = (sent_masks_expanded != sent_masks_expanded.transpose(1, 2)).float()
             causal_mask[padding_mask] = 1
             causal_mask = causal_mask * torch.finfo(inputs_embeds.dtype).min
+            origin_causal_mask = self._update_causal_mask(
+                attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
+            )
+            origin_causal_mask = origin_causal_mask.squeeze(1)
+
             if labels is not None:
                 # attention_mask가 1인 (패딩이 아닌) 위치와 결합하여 label 위치 확인
                 label_indices = label_mask.nonzero(as_tuple=True)
-                origin_causal_mask = self._update_causal_mask(
-                    attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
-                )
-                origin_causal_mask = origin_causal_mask.squeeze(1)
-                selected_causal_values = origin_causal_mask[label_indices[0], label_indices[1], :]
-                causal_mask[label_indices[0], label_indices[1], :] = selected_causal_values
+                # Shift the sequence indices by 1
+                shifted_indices = torch.clamp(label_indices[1] - 1, min=0)
+
+                selected_causal_values = origin_causal_mask[label_indices[0], shifted_indices, :]
+
+                causal_mask[label_indices[0], shifted_indices, :] = selected_causal_values
+                ######################################################
+            else:
+                selected_causal_values = origin_causal_mask[:, -1, :]
+                causal_mask[:, -1, :] = selected_causal_values
+
             #########################################################
             # 패딩 부분은 1로 채워주기
             #########################################################

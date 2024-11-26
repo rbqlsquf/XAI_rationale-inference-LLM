@@ -60,12 +60,12 @@ def evaluate_supporting_facts(gold_sp, pred_sp):
 
 import json
 
-file_path = "data/1113data/hotpot_dev.json"
+file_path = "data/1125data/hotpot_dev.json"
 with open(file_path, "r", encoding="utf-8") as f:
     dev_data = json.load(f)
 
-for i in range(54, 55, 2):
-    f_name = f"result/1114_upper/{i}00-upper.json"
+for i in range(30, 31, 2):
+    f_name = f"result/1126_upper/{i}00.json"
 
     with open(f_name, "r", encoding="utf-8") as file:
         test_data = json.load(file)
@@ -100,6 +100,9 @@ for i in range(54, 55, 2):
                 generated_text = ""
         answer = answer.strip()
         predict = generated_text.strip()
+        print(answer)
+        print(generated_text)
+        print("==========================")
         result_f1.append(f1_score_hotpot(answer, predict))
         result_em.append(exact_match_score(predict, answer))
         ################################################
