@@ -122,13 +122,15 @@ def generate_batch_answer(batches, tokenizer, model):
                 # temperature=0.0,
                 # do_sample=False,
             )
+        input_text = []
+        decoded_outputs = []
+        decoded_outputs_ = []
 
-        input_text = [tokenizer.decode(input_id, skip_special_tokens=True) for i, input_id in enumerate(input_ids)]
-        decoded_outputs = [
-            tokenizer.decode(output[len(input_text[i]) :], skip_special_tokens=True)
-            for i, output in enumerate(outputs)
-        ]
-        decoded_outputs_ = [tokenizer.decode(output, skip_special_tokens=True) for i, output in enumerate(outputs)]
+        for i in range(len(input_ids)):
+            input_text.append(tokenizer.decode(input_ids[i], skip_special_tokens=True))
+            trimmed_output = outputs[i][len(input_ids[i]) :]
+            decoded_outputs.append(tokenizer.decode(trimmed_output, skip_special_tokens=True))
+            decoded_outputs_.append(tokenizer.decode(outputs[i], skip_special_tokens=True))
 
         # Store the generated text back in the input objects
         for i, item in enumerate(batch):
@@ -169,11 +171,11 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--base_model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--train_model_path", type=str, default="model/1125_upper/checkpoint-9400")
+    parser.add_argument("--train_model_path", type=str, default="model/1126_upper/checkpoint-2200")
     parser.add_argument("--data_file", type=str, default="data/1125data/hotpot_dev.json")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
-    parser.add_argument("--output_dir", type=str, default="result/1125_upper/9400.json")
+    parser.add_argument("--output_dir", type=str, default="result/1126_upper/2200.json")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--data_sample", type=bool, default=True)
 
