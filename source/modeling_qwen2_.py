@@ -829,7 +829,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
             position_ids = cache_position.unsqueeze(0)
 
         if sent_masks is None:
-            causal_mask = self._update_causal_mask(
+            origin_causal_mask = self._update_causal_mask(
                 attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
             )
         else:
@@ -870,13 +870,13 @@ class Qwen2Model(Qwen2PreTrainedModel):
             padding_mask = padding_mask_bool.unsqueeze(1) | padding_mask_bool.unsqueeze(2)
             # sent_masks에서 0인 구간을 추출
 
-            causal_mask = (sent_masks_expanded != sent_masks_expanded.transpose(1, 2)).float()
-            causal_mask[padding_mask] = 1
-            causal_mask = causal_mask * torch.finfo(inputs_embeds.dtype).min
+            sent_causal_mask = (sent_masks_expanded != sent_masks_expanded.transpose(1, 2)).float()
+            sent_causal_mask[padding_mask] = 1
+            sent_causal_mask = sent_causal_mask * torch.finfo(inputs_embeds.dtype).min
             origin_causal_mask = self._update_causal_mask(
                 attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
             )
-            origin_causal_mask = origin_causal_mask.squeeze(1)
+            origin_causal_mask_squeezed = origin_causal_mask.squeeze(1)
 
             if labels is not None:
                 # attention_mask가 1인 (패딩이 아닌) 위치와 결합하여 label 위치 확인
@@ -884,18 +884,18 @@ class Qwen2Model(Qwen2PreTrainedModel):
                 # Shift the sequence indices by 1
                 shifted_indices = torch.clamp(label_indices[1] - 1, min=0)
 
-                selected_causal_values = origin_causal_mask[label_indices[0], shifted_indices, :]
+                selected_causal_values = origin_causal_mask_squeezed[label_indices[0], shifted_indices, :]
 
-                causal_mask[label_indices[0], shifted_indices, :] = selected_causal_values
+                sent_causal_mask[label_indices[0], shifted_indices, :] = selected_causal_values
                 ######################################################
             else:
-                selected_causal_values = origin_causal_mask[:, -1, :]
-                causal_mask[:, -1, :] = selected_causal_values
+                selected_causal_values = origin_causal_mask_squeezed[:, -1, :]
+                sent_causal_mask[:, -1, :] = selected_causal_values
 
             #########################################################
             # 패딩 부분은 1로 채워주기
             #########################################################
-            causal_mask = causal_mask.unsqueeze(1)
+            sent_causal_mask = sent_causal_mask.unsqueeze(1)
 
             sent_masks[instruction_mask] = 0  # sent_mask 원상복귀
         hidden_states = inputs_embeds
@@ -908,6 +908,13 @@ class Qwen2Model(Qwen2PreTrainedModel):
         for decoder_layer in self.layers:
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
+            #########################################################
+            #   마지막에만 주기
+            #########################################################
+            causal_mask = origin_causal_mask
+
+            if decoder_layer == self.layers[-1]:
+                causal_mask = sent_causal_mask
 
             if self.gradient_checkpointing and self.training:
                 layer_outputs = self._gradient_checkpointing_func(

@@ -6,7 +6,7 @@ import json
 from peft import PeftModel, PeftConfig
 from datasets import Dataset
 
-from modeling_qwen2_pn_att_1107_upper import Qwen2ForCausalLM_pn, BeamSearchAttentionDecoder
+from modeling_qwen2_pn_att_1107_baseline import Qwen2ForCausalLM_pn, BeamSearchAttentionDecoder
 import argparse
 
 
@@ -114,11 +114,11 @@ def generate_batch_answer(batches, tokenizer, model):
         with torch.no_grad():
             model.evidence = None
             model.sentence_number = None
-            outputs = model.generate(
+            outputs = model(
                 input_ids=input_batch["input_ids"],
                 attention_mask=input_batch["attention_mask"],
                 sent_masks=input_batch["sent_masks"],
-                max_new_tokens=50,
+                # max_new_tokens=50,
                 # temperature=0.0,
                 # do_sample=False,
             )
@@ -128,7 +128,7 @@ def generate_batch_answer(batches, tokenizer, model):
 
         for i in range(len(input_ids)):
             input_text.append(tokenizer.decode(input_ids[i], skip_special_tokens=True))
-            trimmed_output = outputs[i][len(input_ids[i]) :]
+            trimmed_output = outputs[i][len(input_batch["input_ids"][i]) :]
             decoded_outputs.append(tokenizer.decode(trimmed_output, skip_special_tokens=True))
             decoded_outputs_.append(tokenizer.decode(outputs[i], skip_special_tokens=True))
 
@@ -171,11 +171,11 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--base_model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--train_model_path", type=str, default="model/1126_upper/checkpoint-2200")
+    parser.add_argument("--train_model_path", type=str, default="model/1126_upper/checkpoint-15000")
     parser.add_argument("--data_file", type=str, default="data/1125data/hotpot_dev.json")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
-    parser.add_argument("--output_dir", type=str, default="result/1126_upper/2200.json")
+    parser.add_argument("--output_dir", type=str, default="result/1126_upper/15000_test.json")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--data_sample", type=bool, default=True)
 
