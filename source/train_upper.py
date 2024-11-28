@@ -13,7 +13,7 @@ from transformers import (
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 from peft import LoraConfig, get_peft_model
 import wandb
-from modeling_qwen2_pn_att_1107_upper import Qwen2ForCausalLM_pn, BeamSearchAttentionDecoder
+from modeling_qwen2_pn_att_1107_baseline import Qwen2ForCausalLM_pn, BeamSearchAttentionDecoder
 from nltk.translate.bleu_score import sentence_bleu
 from torch.nn import functional as F
 import argparse
@@ -100,28 +100,30 @@ class CustomTrainer(Trainer):
         ]
         ###############
         print(decoded_outputs)
-        loss_fct_2 = CrossEntropyLoss()
-        try:
-            loss_2 = loss_fct_2(
-                sampled_evidence_scores.view(-1, sampled_evidence_scores.size(-1)), inputs["gold_sp"].view(-1)
-            )
-            r_loss = (loss[0, :].mean() + loss_2) / 2
-            print("========================================")
-            print(self.state.global_step)
-            print("loss:{}".format(loss))
-            print("loss_mean:{}".format(loss[0, :].mean()))
-            print("loss_2:{}".format(loss_2))
-            print("r_loss : {}".format(r_loss))
-        except:
-            r_loss = loss[0, :].mean()
-            print("========================================")
-            print(self.state.global_step)
-            print("loss:{}".format(loss))
-            print("loss_mean:{}".format(loss[0, :].mean()))
-            print("loss_2:nononono")
-            print("r_loss : {}".format(r_loss))
-        # Add wandb logging for the evidence losses
-        # Detailed wandb logging
+        # loss_fct_2 = CrossEntropyLoss()
+        # try:
+        #     loss_2 = loss_fct_2(
+        #         sampled_evidence_scores.view(-1, sampled_evidence_scores.size(-1)), inputs["gold_sp"].view(-1)
+        #     )
+        #     r_loss = (loss[0, :].mean() + loss_2) / 2
+        #     print("========================================")
+        #     print(self.state.global_step)
+        #     print("loss:{}".format(loss))
+        #     print("loss_mean:{}".format(loss[0, :].mean()))
+        #     print("loss_2:{}".format(loss_2))
+        #     print("r_loss : {}".format(r_loss))
+        # except:
+        #     r_loss = loss[0, :].mean()
+        #     print("========================================")
+        #     print(self.state.global_step)
+        #     print("loss:{}".format(loss))
+        #     print("loss_mean:{}".format(loss[0, :].mean()))
+        #     print("loss_2:nononono")
+        #     print("r_loss : {}".format(r_loss))
+        # # Add wandb logging for the evidence losses
+        # # Detailed wandb logging
+
+        r_loss = loss[0].mean()
         return (r_loss, outputs) if return_outputs else r_loss
 
 
@@ -228,7 +230,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--data_sample", type=bool, default=True)
+    parser.add_argument("--data_sample", type=bool, default=False)
     args = parser.parse_args()
     print(args)
     #########################################################

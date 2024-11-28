@@ -913,8 +913,8 @@ class Qwen2Model(Qwen2PreTrainedModel):
             #########################################################
             causal_mask = origin_causal_mask
 
-            if decoder_layer == self.layers[-1]:
-                causal_mask = sent_causal_mask
+            # if decoder_layer == self.layers[-1] and sent_masks is not None:
+            #     causal_mask = sent_causal_mask
 
             if self.gradient_checkpointing and self.training:
                 layer_outputs = self._gradient_checkpointing_func(
