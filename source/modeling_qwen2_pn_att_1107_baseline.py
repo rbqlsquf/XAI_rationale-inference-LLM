@@ -295,6 +295,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
                 sent_masks=sent_masks,
                 labels=labels,
             )
+            self.evidence = 0
         tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-3B-Instruct")
         tokenizer.padding_side = "left"
 

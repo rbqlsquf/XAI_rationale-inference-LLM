@@ -64,8 +64,9 @@ file_path = "data/1125data/hotpot_dev.json"
 with open(file_path, "r", encoding="utf-8") as f:
     dev_data = json.load(f)
 
-for i in range(150, 151, 2):
-    f_name = f"result/1126_upper/{i}00.json"
+
+for i in range(26, 27, 2):
+    f_name = f"result/1127_baseline_no_causal/{i}00.json"
 
     with open(f_name, "r", encoding="utf-8") as file:
         test_data = json.load(file)
@@ -77,6 +78,7 @@ for i in range(150, 151, 2):
     result_f1 = []
     result_em = []
     ignore = 0
+    gold_sp_option = False
     for dev, data in zip(dev_data, test_data):
         assert dev["_id"] == data["_id"]
         predict = ""
@@ -106,36 +108,38 @@ for i in range(150, 151, 2):
         result_f1.append(f1_score_hotpot(answer, predict))
         result_em.append(exact_match_score(predict, answer))
         ################################################
-        gold_sp = data["gold_sp"]
-        # pred_sp = data["pred_sp"]
-        pred_sp = [x for x in data["pred_sp"] if x != 0]
-        em, precision, recall, f1 = evaluate_supporting_facts(gold_sp, pred_sp)
-        all_em_score.append(em)
-        all_precision_score.append(precision)
-        all_recall_score.append(recall)
-        all_f1_score.append(f1)
+        if "gold_sp" in data.keys():
+            gold_sp_option = True
+            gold_sp = data["gold_sp"]
+            # pred_sp = data["pred_sp"]
+            pred_sp = [x for x in data["pred_sp"] if x != 0]
+            em, precision, recall, f1 = evaluate_supporting_facts(gold_sp, pred_sp)
+            all_em_score.append(em)
+            all_precision_score.append(precision)
+            all_recall_score.append(recall)
+            all_f1_score.append(f1)
 
-        for i in pred_sp:
-            if answer == "yes" or answer == "no":
-                ignore += 1
-                break
-            if predict in dev["sent"][i - 1]:
-                score.append(dev["_id"])
-                # print(answer)
-                # print(generated_text)
-                # print(dev["sent"][i-1])
-                # print("================")
-                break
+            for i in pred_sp:
+                if answer == "yes" or answer == "no":
+                    ignore += 1
+                    break
+                if predict in dev["sent"][i - 1]:
+                    score.append(dev["_id"])
+                    # print(answer)
+                    # print(generated_text)
+                    # print(dev["sent"][i-1])
+                    # print("================")
+                    break
 
         # F1 점수와 EM 점수 출력
     print(f_name)
     print("F1 점수: ", sum(result_f1) / len(result_f1))
     print("EM 점수: ", sum(result_em) / len(result_em))
-
-    # F1 점수와 EM 점수 출력
-    print("all_em_score 점수: ", sum(all_em_score) / len(all_em_score))
-    print("all_f1_score 점수: ", sum(all_f1_score) / len(all_f1_score))
-    print("all_precision_score 점수: ", sum(all_precision_score) / len(all_precision_score))
-    print("all_recall_score 점수: ", sum(all_recall_score) / len(all_recall_score))
+    if gold_sp_option:
+        # F1 점수와 EM 점수 출력
+        print("all_em_score 점수: ", sum(all_em_score) / len(all_em_score))
+        print("all_f1_score 점수: ", sum(all_f1_score) / len(all_f1_score))
+        print("all_precision_score 점수: ", sum(all_precision_score) / len(all_precision_score))
+        print("all_recall_score 점수: ", sum(all_recall_score) / len(all_recall_score))
     print("=================================================")
     print(len(result_em))

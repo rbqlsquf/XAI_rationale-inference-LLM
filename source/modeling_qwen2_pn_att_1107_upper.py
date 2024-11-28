@@ -438,7 +438,6 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
                 hidden_states.bmm(cur_evidence) / math.sqrt(d_k), dim=-1
             )  # (batch, max_length, dec_len)
             weighted_evidence = weight.bmm(cur_evidence.transpose(1, 2))  # (batch, max_length, hidden)
-            tmp_hidden_states = self.linear_w1(torch.cat([hidden_states, weighted_evidence], -1))
             #                   : (batch, max_length, hidden*2) -> (batch, max_length, hidden)
             # logits = self.lm_head(last_hidden)
 
