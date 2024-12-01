@@ -1,4 +1,3 @@
-
 import os
 import torch
 from datasets import Dataset
@@ -14,7 +13,7 @@ from transformers import (
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 from peft import LoraConfig, get_peft_model
 import wandb
-from modeling_qwen2_pn_att_sum import Qwen2ForCausalLM_pn, BeamSearchAttentionDecoder
+from modeling_qwen2_pn_att_1107_upper import Qwen2ForCausalLM_pn, BeamSearchAttentionDecoder
 from nltk.translate.bleu_score import sentence_bleu
 from torch.nn import functional as F
 import argparse
@@ -29,12 +28,22 @@ class CustomDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
         batch = super().__call__(features_without_masks)
 
         sentence_masks = [f.get("sent_masks", None) for f in features]
+        gold_sp = [f.get("gold_sp", None) for f in features]
         # sentence_masks가 None이 아닌 경우 패딩 처리
         if sentence_masks[0] is not None:
             max_length = max(len(mask) for mask in sentence_masks)
             padded_sentence_masks = [[0] * (max_length - len(mask)) + mask for mask in sentence_masks]
             batch["sent_masks"] = torch.tensor(padded_sentence_masks)
-
+        if gold_sp[0] is not None:
+            max_length = 3
+            padded_sentence_masks = []
+            for sp in gold_sp:
+                if len(sp) > max_length:
+                    sp = sp[:max_length]
+                # Pad if shorter than max_length
+                padded_sp = sp + [0] * (max_length - len(sp))
+                padded_sentence_masks.append(padded_sp)
+            batch["gold_sp"] = torch.tensor(padded_sentence_masks)
         return batch
 
 
@@ -77,6 +86,19 @@ class CustomTrainer(Trainer):
             # We don't use .loss here since the model may return tuples instead of ModelOutput.
             loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]  # path, batch , 1742(max_sent)
 
+        sampled_evidence_scores = outputs.get("attention_scores")  # batch*path, 2, max_sent??
+        mask = outputs.get("mask")  # batch, dec_len, max_sent
+        path_logits = outputs.get("path_logits")  # path, batch, max_len, 151667
+        sampled_evidence_sentence = outputs.get("evidence_sentences")
+        logit = torch.argmax(path_logits[0], dim=-1)
+
+        decoded_outputs = [
+            tokenizer.decode(output[inputs["labels"][i] != -100], skip_special_tokens=True)
+            for i, output in enumerate(logit)
+        ]
+        ###############
+        print(decoded_outputs)
+
         r_loss = loss[0, :].mean()
         print("========================================")
         print(self.state.global_step)
@@ -84,15 +106,32 @@ class CustomTrainer(Trainer):
 
         return (r_loss, outputs) if return_outputs else r_loss
 
+
 def create_model(model_path, config):
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     model = Qwen2ForCausalLM_pn.from_pretrained(model_path, config=config, device_map="cuda")
     model.enable_input_require_grads()
-    gru = BeamSearchAttentionDecoder(hidden_size=config.hidden_size, num_sent=config.max_dec_len, topk=config.beam_size)
+    gru = BeamSearchAttentionDecoder(
+        hidden_size=config.hidden_size, num_sent=config.max_dec_len, topk=config.beam_size
+    )
     model.set_gru(gru)
     model.config.use_cache = False
     tokenizer.padding_side = "left"
     return tokenizer, model
+
+
+def create_model_for_debug(base_model_path, lora_path, config):
+    tokenizer = AutoTokenizer.from_pretrained(base_model_path)
+    trained_model = Qwen2ForCausalLM_pn.from_pretrained(lora_path, config=config, device_map="auto")
+    gru = BeamSearchAttentionDecoder(
+        hidden_size=config.hidden_size, num_sent=config.max_dec_len, topk=config.beam_size
+    )
+    trained_model.set_gru(gru)
+    trained_model.config.use_cache = False
+    tokenizer.padding_side = "left"
+    print("LORA WEIGHT LOADING")
+    trained_model.load_pn_model(lora_path)
+    return tokenizer, trained_model
 
 
 IGNORE_INDEX = -100
@@ -101,18 +140,6 @@ IGNORE_INDEX = -100
 def process_func(example, tokenizer):
     MAX_LENGTH = 2048
     input_ids, attention_mask, labels = [], [], []
-    mrc_value = -1
-    sum_value = -1
-    if example["mrc_type"] == "T":
-        mrc_value = "True"
-    else:
-        mrc_value = "False"
-    if example["sum_type"] == "T":
-        sum_value = "True"
-    else:
-        sum_value = "False"
-
-    task_instruction = "Only fill in the **Answer to the **Question based on the **Document if <|MRC|> is True. Do not fill in the **Answer if the Question is not provided or if <|MRC|> is False. Only fill in the **Summary with a summary of the **Document if <|SUM|> is True. Do not fill in the **Summary if <|SUM|> is False."
     example["document"] = example["document"].strip()
     # token 된 doc
     token_doc = {"input_ids": [], "attention_mask": []}
@@ -128,61 +155,20 @@ def process_func(example, tokenizer):
         token_doc["input_ids"] += token_sent["input_ids"]
         token_doc["attention_mask"] += token_sent["attention_mask"]
     token_end = tokenizer("<|im_end|>\n", add_special_tokens=False)
-    sentence_position.extend([0] * len(token_end))
+    sentence_position.extend([sentence_number] * len(token_end))
     token_doc["input_ids"] += token_end["input_ids"]
     token_doc["attention_mask"] += token_end["attention_mask"]
 
     ########################################################################################################################
     #           전처리 형태 바꾸기
     ########################################################################################################################
-    if example["data_type"] == "answer":
-        if example["answer_type"] == "F":
-            if example["question"] == "no":  # 질문이 없는 경우
-                instruction = tokenizer(
-                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n",
-                    add_special_tokens=False,
-                )
-            else:
-                instruction = tokenizer(
-                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n",
-                    add_special_tokens=False,
-                )
-            response = tokenizer(
-                f"<|im_start|>assistant\n**Answer:\n**Summary:\n<|im_end|>\n", add_special_tokens=False
-            )
-        else:  # 답 해야하는 경우 질문은 무조건 있음
-            instruction = tokenizer(
-                f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n",
-                add_special_tokens=False,
-            )
-            response = tokenizer(
-                f"<|im_start|>assistant\n**Answer:{example['output'].strip()}\n**Summary:\n<|im_end|>\n",
-                add_special_tokens=False,
-            )
-    elif example["data_type"] == "summary":
-        if example["answer_type"] == "F":  # 무응답의 경우 질문이 무조건 없음
-            instruction = tokenizer(
-                f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n",
-                add_special_tokens=False,
-            )
-            response = tokenizer(
-                f"<|im_start|>assistant\n**Answer:\n**Summary:\n<|im_end|>\n", add_special_tokens=False
-            )
-        else:  # 답 해야하는 경우 질문 유무
-            if example["question"] == "summary":  # 질문이 없는 경우
-                instruction = tokenizer(
-                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n{example['document']}<|im_end|>\n",
-                    add_special_tokens=False,
-                )
-            else:
-                instruction = tokenizer(
-                    f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n{example['document']}<|im_end|>\n",
-                    add_special_tokens=False,
-                )
-            response = tokenizer(
-                f"<|im_start|>assistant\n**Answer:\n**Summary:{example['output'].strip()}\n<|im_end|>\n",
-                add_special_tokens=False,
-            )
+    instruction = tokenizer(
+        f"<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n",
+        add_special_tokens=False,
+    )
+    response = tokenizer(
+        f"<|im_start|>assistant\n**Answer:{example['output'].strip()}<|im_end|>\n", add_special_tokens=False
+    )
 
     # instruction에 대한 문장 번호
     sentence_position = [0] * len(instruction["input_ids"]) + sentence_position
@@ -202,6 +188,7 @@ def process_func(example, tokenizer):
         "attention_mask": attention_mask,
         "labels": labels,
         "sent_masks": sentence_position,
+        "gold_sp": example["supporting_num"],
     }
 
 
@@ -212,12 +199,13 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--data_file", type=str, default="data/1020data/train_hotpot_cnn_filtered.json")
+    parser.add_argument("--data_file", type=str, default="data/1125data/hotpot_train_shuffle_30k.json")
+    parser.add_argument("--lora_path", type=str, default="model/1124_upper/checkpoint-4400")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
-    parser.add_argument("--new_model", type=str, default="new_model")
+    parser.add_argument("--new_model", type=str, default="new_mode")
     parser.add_argument("--wandb_project", type=str, default="llm pointer network")
-    parser.add_argument("--wandb_run_name", type=str, default="1103+loss")
+    parser.add_argument("--wandb_run_name", type=str, default="test")
     parser.add_argument("--output_dir", type=str, default="qwen_lora_1026")
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=2)

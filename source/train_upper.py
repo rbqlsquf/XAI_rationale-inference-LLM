@@ -123,7 +123,6 @@ class CustomTrainer(Trainer):
         # # Add wandb logging for the evidence losses
         # # Detailed wandb logging
 
-        r_loss = loss[0].mean()
         return (r_loss, outputs) if return_outputs else r_loss
 
 

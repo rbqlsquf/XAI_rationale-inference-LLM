@@ -65,8 +65,8 @@ with open(file_path, "r", encoding="utf-8") as f:
     dev_data = json.load(f)
 
 
-for i in range(26, 27, 2):
-    f_name = f"result/1127_baseline_no_causal/{i}00.json"
+for i in range(150, 151, 2):
+    f_name = f"result/1127_baseline/all_{i}00.json"
 
     with open(f_name, "r", encoding="utf-8") as file:
         test_data = json.load(file)
