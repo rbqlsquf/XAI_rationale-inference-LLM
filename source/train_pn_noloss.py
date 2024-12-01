@@ -22,8 +22,9 @@ import argparse
 class CustomDataCollatorForSeq2Seq(DataCollatorForSeq2Seq):
     def __call__(self, features):
         # sentence_masks를 제외한 features 리스트 생성
-        features_without_masks = [{k: v for k, v in f.items() if k != "sent_masks"} for f in features]
-
+        features_without_masks = [
+            {k: v for k, v in f.items() if k != "sent_masks" and k != "gold_sp"} for f in features
+        ]
         # 부모 클래스에서 features_without_masks 처리
         batch = super().__call__(features_without_masks)
 
@@ -252,9 +253,10 @@ if __name__ == "__main__":
     ##############################################################
     #               wanb
     ##############################################################
-    wandb.init(project=args.wandb_project)
+    wandb.init(project=args.wandb_project, save_code=True)
     wandb.run.name = args.wandb_run_name
-
+    wandb.save("modeling_qwen2_pn_att_1107_upper.py")
+    wandb.save("modeling_qwen2_.py")
     ##############################################################
     training_params = TrainingArguments(
         output_dir=args.output_dir,
