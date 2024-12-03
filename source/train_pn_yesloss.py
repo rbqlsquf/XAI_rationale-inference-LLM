@@ -351,7 +351,7 @@ class CustomTrainer(Trainer):
         # Detailed wandb logging
         wandb.log(
             {
-                "losses/evidence_nll": torch.mean(evidence_nll).item(),
+                "losses/evidenc.e_nll": torch.mean(evidence_nll).item(),
                 "losses/g_evidence_nll": torch.mean(g_evidence_nll).item(),
                 "losses/total_loss": loss.mean().item(),
                 "losses/r_loss": r_loss.item(),
@@ -412,7 +412,7 @@ def process_func(example, tokenizer):
         token_doc["input_ids"] += token_sent["input_ids"]
         token_doc["attention_mask"] += token_sent["attention_mask"]
     token_end = tokenizer("<|im_end|>\n", add_special_tokens=False)
-    sentence_position.extend([0] * len(token_end))
+    sentence_position.extend([sentence_number] * len(token_end))
     token_doc["input_ids"] += token_end["input_ids"]
     token_doc["attention_mask"] += token_end["attention_mask"]
 
@@ -455,8 +455,7 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    # parser.add_argument("--data_file", type=str, default="data/1113data/train_data_1115.json")
-    parser.add_argument("--data_file", type=str, default="data/1113data/hotpot_train_shuffle.json")
+    parser.add_argument("--data_file", type=str, default="data/1125data/hotpot_train_shuffle_30k.json")
     parser.add_argument("--lora_path", type=str, default="/hdd/rbqlsquf/1115_yesloss_final/checkpoint-15000")
     parser.add_argument("--beam_size", type=int, default=5)
     parser.add_argument("--max_dec_len", type=int, default=3)
