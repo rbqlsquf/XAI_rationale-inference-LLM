@@ -287,6 +287,14 @@ class CustomTrainer(Trainer):
         mask = outputs.get("mask")  # batch, dec_len, max_sent
         path_logits = outputs.get("path_logits")  # path, batch, max_len, 151667
         sampled_evidence_sentence = outputs.get("evidence_sentences")
+        logit = torch.argmax(path_logits[0], dim=-1)
+
+        decoded_outputs = [
+            tokenizer.decode(output[inputs["labels"][i] != -100], skip_special_tokens=True)
+            for i, output in enumerate(logit)
+        ]
+        ###############
+        print(decoded_outputs)
 
         #####################################################################
         #               형태 바꾸기
@@ -301,7 +309,8 @@ class CustomTrainer(Trainer):
         predicted_answer, evidence_predicted_answer = self.generate_sentences(
             model, inputs, r_batch_size, path_logits, sampled_evidence_sentence
         )
-
+        print(predicted_answer)
+        print(evidence_predicted_answer)
         best_path, f1_list, g_f1_list = self.compute_evidence_f1_score(
             predicted_answer, evidence_predicted_answer, inputs, r_batch_size
         )
@@ -310,26 +319,20 @@ class CustomTrainer(Trainer):
             r_batch_size, f1_list, g_f1_list, sampled_evidence_scores, sampled_evidence_sentence, mask
         )
         column_indices = torch.arange(r_batch_size, device="cuda")
-        aa = []
-        for e in evidence_nll:
-            if False in [True if k.item() > 0 else False for k in e]:
-                aa.append(False)
-        if False in aa:
-            print(aa)
-            model.model.evidence = None
-            outputs = model(**inputs)
-        if (
-            torch.mean(evidence_nll).item() != 0
-            and torch.mean(evidence_nll).item() < 1000
-            and not torch.any(torch.isnan(evidence_nll))
-        ):
-            loss = loss + 0.1 * evidence_nll
+
+        # if (
+        #     torch.mean(evidence_nll).item() != 0
+        #     and torch.mean(evidence_nll).item() < 1000
+        #     and not torch.any(torch.isnan(evidence_nll))
+        # ):
+        #     loss = loss + 0.1 * evidence_nll
         if (
             torch.mean(g_evidence_nll).item() != 0
             and torch.mean(g_evidence_nll).item() < 1000
             and not torch.any(torch.isnan(g_evidence_nll))
         ):
             loss = loss + 0.1 * g_evidence_nll
+            # loss = (loss + g_evidence_nll) /2
 
         r_loss = loss[best_path, column_indices].mean()
 

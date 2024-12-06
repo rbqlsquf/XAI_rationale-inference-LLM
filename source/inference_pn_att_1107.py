@@ -13,7 +13,9 @@ import argparse
 def create_model(base_model_path, lora_path, config):
     tokenizer = AutoTokenizer.from_pretrained(base_model_path)
     trained_model = Qwen2ForCausalLM_pn.from_pretrained(lora_path, config=config, device_map="auto")
-    gru = BeamSearchAttentionDecoder(hidden_size=config.hidden_size, num_sent=config.max_dec_len, topk=config.beam_size)
+    gru = BeamSearchAttentionDecoder(
+        hidden_size=config.hidden_size, num_sent=config.max_dec_len, topk=config.beam_size
+    )
     trained_model.set_gru(gru)
     trained_model.config.use_cache = False
     tokenizer.padding_side = "left"
@@ -32,10 +34,8 @@ class InferenceInput:
         self.gold_sp = gold_sp
 
 
-def create_example(all_example, tokenizer, data_sample, mrc_value, sum_value):
+def create_example(all_example, tokenizer, data_sample):
     all_result = []
-
-    task_instruction = "Only fill in the **Answer to the **Question based on the **Document if <|MRC|> is True. Do not fill in the **Answer if the Question is not provided or if <|MRC|> is False. Only fill in the **Summary with a summary of the **Document if <|SUM|> is True. Do not fill in the **Summary if <|SUM|> is False."
     for example in tqdm(all_example):
         example["document"] = example["document"].strip()
         # token 된 doc
@@ -56,26 +56,11 @@ def create_example(all_example, tokenizer, data_sample, mrc_value, sum_value):
         token_doc["input_ids"] += token_end["input_ids"]
         token_doc["attention_mask"] += token_end["attention_mask"]
 
-        if example["question"] == "summary":
-            instruction = tokenizer(
-                f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Document:\n",
-                add_special_tokens=False,
-            )
-            # response = tokenizer(
-            #     f"<|im_start|>assistant\n**Answer:\n**Summary:{example['output'].strip()}\n<|im_end|>\n",
-            #     add_special_tokens=False,
-            # )
-            response = f"<|im_start|>assistant\n**Answer:\n**Summary:{example['output'].strip()}\n<|im_end|>\n"
-        else:  # MRC의 경우
-            instruction = tokenizer(
-                f"<|im_start|>system\n{task_instruction}\n<|MRC|>{mrc_value}<|SUM|>{sum_value}<|im_end|>\n<|im_start|>user\n**Question:{example['question'].strip()}\n**Document:\n",
-                add_special_tokens=False,
-            )
-            # response = tokenizer(
-            #     f"<|im_start|>assistant\n**Answer:{example['output'].strip()}\n**Summary:\n<|im_end|>\n",
-            #     add_special_tokens=False,
-            # )
-            response = f"<|im_start|>assistant\n**Answer:{example['output'].strip()}\n**Summary:\n<|im_end|>\n"
+        instruction = tokenizer(
+            f"<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\n<|im_start|>user\n**Question:{example['question'].strip()}\n**Document:\n",
+            add_special_tokens=False,
+        )
+        response = f"<|im_start|>assistant\n**Answer:{example['output'].strip()}\n<|im_end|>\n"
         sentence_position = [0] * len(instruction["input_ids"]) + sentence_position
         input = instruction["input_ids"] + token_doc["input_ids"]
         attention_mask = instruction["attention_mask"] + token_doc["attention_mask"]
@@ -98,7 +83,7 @@ def create_example(all_example, tokenizer, data_sample, mrc_value, sum_value):
             )
         )
         if data_sample:
-            if len(all_result) == 30:
+            if len(all_result) == 100:
                 break
     return all_result
 
@@ -116,6 +101,7 @@ def generate_batch_answer(batches, tokenizer, model):
         sentence_masks = [item.sent_masks for item in batch]
 
         model.to("cuda")
+        model.eval()
         input_batch = {}
         max_length = max(len(mask) for mask in input_ids)
         padded_input_ids = [[tokenizer.pad_token_id] * (max_length - len(mask)) + mask for mask in input_ids]
@@ -132,14 +118,19 @@ def generate_batch_answer(batches, tokenizer, model):
                 input_ids=input_batch["input_ids"],
                 attention_mask=input_batch["attention_mask"],
                 sent_masks=input_batch["sent_masks"],
-                max_new_tokens=200,
+                max_new_tokens=50,
+                # temperature=0.0,
+                # do_sample=False,
             )
+        input_text = []
+        decoded_outputs = []
+        decoded_outputs_ = []
 
-        input_text = [tokenizer.decode(input_id, skip_special_tokens=True) for i, input_id in enumerate(input_ids)]
-        decoded_outputs = [
-            tokenizer.decode(output[len(input_text) :], skip_special_tokens=True) for i, output in enumerate(outputs)
-        ]
-        decoded_outputs_ = [tokenizer.decode(output, skip_special_tokens=True) for i, output in enumerate(outputs)]
+        for i in range(len(input_ids)):
+            input_text.append(tokenizer.decode(input_ids[i], skip_special_tokens=True))
+            trimmed_output = outputs[i][len(input_batch["input_ids"][i]) :]
+            decoded_outputs.append(tokenizer.decode(trimmed_output, skip_special_tokens=True))
+            decoded_outputs_.append(tokenizer.decode(outputs[i], skip_special_tokens=True))
 
         # Store the generated text back in the input objects
         for i, item in enumerate(batch):
@@ -180,15 +171,14 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--base_model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--train_model_path", type=str, default="model/1107_weighted_context/checkpoint-2200")
-    parser.add_argument("--data_file", type=str, default="data/1029data/hotpot_dev_supporting.json")
+    parser.add_argument("--train_model_path", type=str, default="/hdd/rbqlsquf/1128_upper/checkpoint-15000")
+    parser.add_argument("--data_file", type=str, default="data/1125data/hotpot_dev.json")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
-    parser.add_argument("--output_dir", type=str, default="result/1107_weighted_context/hotpot_tt_2200.json")
+    parser.add_argument("--output_dir", type=str, default="result/1128_upper/15000.json")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--data_sample", type=bool, default=True)
-    parser.add_argument("--mrc_value", type=str, default=True)
-    parser.add_argument("--sum_value", type=str, default=False)
+
     args = parser.parse_args()
     print(args)
     #########################################################
@@ -205,7 +195,7 @@ if __name__ == "__main__":
     with open(args.data_file, "r", encoding="utf-8") as file:
         dev_data = json.load(file)
 
-    input_data = create_example(dev_data, tokenizer, args.data_sample, args.mrc_value, args.sum_value)
+    input_data = create_example(dev_data, tokenizer, args.data_sample)
 
     # Create batches of input items
     batches = list(create_batches(input_data, args.batch_size))

@@ -38,6 +38,8 @@ class BeamSearchAttentionDecoder(nn.Module):
 
         self.div_term = math.sqrt(hidden_size)
         self.topk = topk  # beam_size랑 동일, 인자로 첨부터 넘겨받긴함
+        self.key_linear = nn.Linear(hidden_size, hidden_size)
+        self.value_linear = nn.Linear(hidden_size, hidden_size)
 
     def forward(
         self,
@@ -59,8 +61,8 @@ class BeamSearchAttentionDecoder(nn.Module):
         batch_size = decoder_inputs.size(0)
         max_sent = encoder_outputs.size(1)
         indexes = [e for e in range(batch_size)]
-        key_encoder_outputs = encoder_outputs
-        value_encoder_outputs = key_encoder_outputs
+        key_encoder_outputs = self.key_linear(encoder_outputs)
+        value_encoder_outputs = self.value_linear(encoder_outputs)
         # key_encoder_outputs = key_encoder_outputs + encoder_outputs
         # value_encoder_outputs = self.dense2(encoder_outputs)
         # value_encoder_outputs = value_encoder_outputs + encoder_outputs
@@ -84,15 +86,15 @@ class BeamSearchAttentionDecoder(nn.Module):
 
         # hidden_states = torch.cat([context, output], -1)
         # result : [batch*topk, 1, hidden]
-        # result = context # self.dense3(hidden_states)  # context와 output을 concat한 값
-        tmp_list = []
-        tmp_evi_sentence_index = attn_alignment.argmax(dim=-1)
-        for batch_idx in range(batch_size):
-            tmp_list.append(encoder_outputs[batch_idx, tmp_evi_sentence_index[batch_idx], :].squeeze(0))
+        result = context  # self.dense3(hidden_states)  # context와 output을 concat한 값
+        # tmp_list = []
+        # tmp_evi_sentence_index = attn_alignment.argmax(dim=-1)
+        # for batch_idx in range(batch_size):
+        #     tmp_list.append(encoder_outputs[batch_idx, tmp_evi_sentence_index[batch_idx], :].squeeze(0))
 
-        evi_sent_representation = torch.stack(tmp_list)
-        # evi_sent_representation = torch.stack([encoder_outputs[batch_idx, evidence_sentence_index[batch_idx], :]] for batch_idx in range(batch_size))
-        result = evi_sent_representation.unsqueeze(1)
+        # evi_sent_representation = torch.stack(tmp_list)
+        # # evi_sent_representation = torch.stack([encoder_outputs[batch_idx, evidence_sentence_index[batch_idx], :]] for batch_idx in range(batch_size))
+        # result = evi_sent_representation.unsqueeze(1)
 
         ##################################################################
         #               beam search 계산
@@ -265,6 +267,7 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         if sample:
             self.gru.topk = 1
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
+
         outputs = self.model(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -420,11 +423,10 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
                 hidden_states.bmm(cur_evidence) / math.sqrt(d_k), dim=-1
             )  # (batch, max_length, dec_len)
             weighted_evidence = weight.bmm(cur_evidence.transpose(1, 2))  # (batch, max_length, hidden)
-            tmp_hidden_states = self.linear_w1(torch.cat([hidden_states, weighted_evidence], -1))
             #                   : (batch, max_length, hidden*2) -> (batch, max_length, hidden)
             # logits = self.lm_head(last_hidden)
 
-            # tmp_hidden_states = hidden_states + self.evidence[:, path, :].unsqueeze(1)
+            tmp_hidden_states = hidden_states + weighted_evidence
             all_path_logits.append(self.lm_head(tmp_hidden_states).float())
 
         loss = None
