@@ -171,11 +171,11 @@ if __name__ == "__main__":
     ##############################################################
     parser = argparse.ArgumentParser(description="인자값을 전달받는 Python 스크립트")
     parser.add_argument("--base_model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--train_model_path", type=str, default="/hdd/rbqlsquf/1128_upper/checkpoint-15000")
+    parser.add_argument("--train_model_path", type=str, default="model/1205_yesloss/checkpoint-15000")
     parser.add_argument("--data_file", type=str, default="data/1125data/hotpot_dev.json")
     parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
-    parser.add_argument("--output_dir", type=str, default="result/1128_upper/15000.json")
+    parser.add_argument("--output_dir", type=str, default="result/1205_yesloss/15000.json")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--data_sample", type=bool, default=True)
 

@@ -90,7 +90,7 @@ class CustomTrainer(Trainer):
                 tmp_input_ids = tmp_input_ids + tokenizer.encode(
                     "<|im_end|>\n"
                 )  # 원래도 데이터에 문장 뒤에 띄어쓰기 있어서 한번 해봄
-                tmp_sentence_mask = tmp_sentence_mask + [0] * 2
+                tmp_sentence_mask = tmp_sentence_mask + [j + 1] * 2
                 ignore_padding_index = (inputs["labels"][k] == -100).nonzero(as_tuple=True)[0]
                 tmp_labels = [IGNORE_INDEX] * (len(tmp_input_ids))  # 엔터랑 eos까지 더해주기
                 if ignore_padding_index.numel() > 0:
@@ -140,6 +140,8 @@ class CustomTrainer(Trainer):
                 sample=sample,
             )
             e_logits = e_outputs.get("logits")  # path, batch , 1742(max_sent)
+            e_outputs_evdience = e_outputs.get("evidence_sentences")
+            print(e_outputs_evdience)
             argmax_e_logits = torch.argmax(e_logits, dim=-1)
 
             e_decoded_outputs = [
@@ -289,13 +291,6 @@ class CustomTrainer(Trainer):
         sampled_evidence_sentence = outputs.get("evidence_sentences")
         logit = torch.argmax(path_logits[0], dim=-1)
 
-        decoded_outputs = [
-            tokenizer.decode(output[inputs["labels"][i] != -100], skip_special_tokens=True)
-            for i, output in enumerate(logit)
-        ]
-        ###############
-        print(decoded_outputs)
-
         #####################################################################
         #               형태 바꾸기
         #####################################################################
@@ -309,6 +304,8 @@ class CustomTrainer(Trainer):
         predicted_answer, evidence_predicted_answer = self.generate_sentences(
             model, inputs, r_batch_size, path_logits, sampled_evidence_sentence
         )
+        print(sampled_evidence_scores)
+        print(sampled_evidence_sentence)
         print(predicted_answer)
         print(evidence_predicted_answer)
         best_path, f1_list, g_f1_list = self.compute_evidence_f1_score(
@@ -422,10 +419,15 @@ def process_func(example, tokenizer):
     ########################################################################################################################
     #           전처리 형태 바꾸기
     ########################################################################################################################
+    # instruction = tokenizer(
+    #     f"<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n",
+    #     add_special_tokens=False,
+    # )
     instruction = tokenizer(
-        f"<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n",
+        f"<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant. When presented with a question, infer the correct answer based only on the content explicitly stated in the provided document. Do not use external knowledge, make assumptions, or interpret beyond what the document clearly supports. Respond with facts directly supported by the text.<|im_end|>\n<|im_start|>user\n**Question:{example['question']}\n**Document:\n",
         add_special_tokens=False,
     )
+
     response = tokenizer(
         f"<|im_start|>assistant\n**Answer:{example['output'].strip()}<|im_end|>\n", add_special_tokens=False
     )
@@ -460,7 +462,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", type=str, default="Qwen/Qwen2.5-3B-Instruct")
     parser.add_argument("--data_file", type=str, default="data/1125data/hotpot_train_shuffle_30k.json")
     parser.add_argument("--lora_path", type=str, default="/hdd/rbqlsquf/1115_yesloss_final/checkpoint-15000")
-    parser.add_argument("--beam_size", type=int, default=5)
+    parser.add_argument("--beam_size", type=int, default=1)
     parser.add_argument("--max_dec_len", type=int, default=3)
     parser.add_argument("--new_model", type=str, default="new_model")
     parser.add_argument("--wandb_project", type=str, default="llm pointer network")

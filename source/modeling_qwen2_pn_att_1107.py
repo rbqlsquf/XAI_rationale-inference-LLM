@@ -365,9 +365,15 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
             #           입력을 topk 만큼 복제
             #################################################
             # [batch, 1, hidden] -> [batch, topk, hidden]  -> [batch *topk, 1, hidden] -> 묶음으로 repeat됨 앞에 단위를 게속 반복하는 느낌
-            decoder_inputs = decoder_inputs.repeat(1, self.beam_size, 1).view(-1, 1, self.hidden_size)
-            encoder_outputs = encoder_outputs.repeat(1, self.beam_size, 1).view(-1, max_sent, self.hidden_size)
-            sent_attention_masks = sent_attention_masks.repeat(1, self.beam_size, 1).view(-1, 1, max_sent)
+            if sample:
+                decoder_inputs = decoder_inputs.repeat(1, 1, 1).view(-1, 1, self.hidden_size)
+                encoder_outputs = encoder_outputs.repeat(1, 1, 1).view(-1, max_sent, self.hidden_size)
+                sent_attention_masks = sent_attention_masks.repeat(1, 1, 1).view(-1, 1, max_sent)
+
+            else:
+                decoder_inputs = decoder_inputs.repeat(1, self.beam_size, 1).view(-1, 1, self.hidden_size)
+                encoder_outputs = encoder_outputs.repeat(1, self.beam_size, 1).view(-1, max_sent, self.hidden_size)
+                sent_attention_masks = sent_attention_masks.repeat(1, self.beam_size, 1).view(-1, 1, max_sent)
 
             evidence_scores = None
             evidence_sentences = []
@@ -397,7 +403,10 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
                 #   디코더 입력을 sentence_representation의 근거 문장 부분만으로 가지고 옴
                 ########################################################################################
                 # [batch, beam_size, hidden]
-                reshape_decoder_inputs = decoder_inputs.view(-1, self.beam_size, self.hidden_size)
+                if sample:
+                    reshape_decoder_inputs = decoder_inputs.view(-1, 1, self.hidden_size)
+                else:
+                    reshape_decoder_inputs = decoder_inputs.view(-1, self.beam_size, self.hidden_size)
                 evidence_vectors.append(reshape_decoder_inputs)
 
             evidence_vector = torch.stack(evidence_vectors, 0).permute(2, 1, 3, 0)
@@ -412,7 +421,11 @@ class Qwen2ForCausalLM_pn(Qwen2ForCausalLM):
         ##############################################################################
         # element 합으로 수정
         all_path_logits = []
-        for path in range(self.beam_size):
+        if sample:
+            num_path = 1
+        else:
+            num_path = self.beam_size
+        for path in range(num_path):
             # hidden_states : (batch, max_length, hidden)
             # self.evidence : (batch, 1, hidden)
 
